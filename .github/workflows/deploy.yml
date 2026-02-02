@@ -26,5 +26,6 @@ jobs:
             set -e
             cd /srv/app/repo
             git pull
+            cd ..
             docker compose build --no-cache web collector
             docker compose up -d --force-recreate
