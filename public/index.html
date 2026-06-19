@@ -359,6 +359,8 @@
       markerZoomAnimation: false
     }).setView([32.5252, -93.7502], 11);
     const markerRenderer = L.canvas({ padding: 0.5 });
+    const medicalMarkerRenderer = L.svg({ padding: 0.5 });
+    const MEDICAL_MARKER_PATTERN_ID = 'medical-marker-stripes';
     
     // Keep view constrained to a few-state window around Louisiana/Texas/Arkansas
     const southWest = L.latLng(29.0, -98.0);
@@ -906,7 +908,41 @@
     }
 
     function getMarkerFill(sev) {
+      if (sev === 'medical') return `url(#${MEDICAL_MARKER_PATTERN_ID})`;
       return getSeverityColor(sev);
+    }
+
+    function getMarkerRenderer(sev) {
+      return sev === 'medical' ? medicalMarkerRenderer : markerRenderer;
+    }
+
+    function ensureMedicalMarkerStripePattern() {
+      const svg = medicalMarkerRenderer?._container;
+      if (!svg || svg.querySelector(`#${MEDICAL_MARKER_PATTERN_ID}`)) return;
+
+      const svgNs = 'http://www.w3.org/2000/svg';
+      const defs = document.createElementNS(svgNs, 'defs');
+      const pattern = document.createElementNS(svgNs, 'pattern');
+      pattern.setAttribute('id', MEDICAL_MARKER_PATTERN_ID);
+      pattern.setAttribute('patternUnits', 'userSpaceOnUse');
+      pattern.setAttribute('width', '12');
+      pattern.setAttribute('height', '12');
+
+      const base = document.createElementNS(svgNs, 'rect');
+      base.setAttribute('width', '12');
+      base.setAttribute('height', '12');
+      base.setAttribute('fill', '#f1f3f6');
+
+      const stripes = document.createElementNS(svgNs, 'path');
+      stripes.setAttribute('d', 'M -3 12 L 12 -3 M 3 15 L 15 3');
+      stripes.setAttribute('stroke', '#ff3b3b');
+      stripes.setAttribute('stroke-width', '5');
+      stripes.setAttribute('stroke-linecap', 'square');
+
+      pattern.appendChild(base);
+      pattern.appendChild(stripes);
+      defs.appendChild(pattern);
+      svg.insertBefore(defs, svg.firstChild);
     }
 
     const SOURCE_ORDER = ['caddo', 'batonrouge', 'lafayette'];
@@ -1435,13 +1471,18 @@
       const sizeMeters = _geocodeTriangleSizeMeters(incident, mode);
       const points = _triangleLatLngs(incident.latitude, incident.longitude, sizeMeters, seed);
       const marker = L.polygon(points, {
-        renderer: markerRenderer,
+        renderer: getMarkerRenderer(sev),
         color,
         weight: mode === 'history' ? 1 : 1.2,
         opacity: 0.9,
         fillColor,
-        fillOpacity: mode === 'history' ? 0.2 : 0.32,
+        fillOpacity: sev === 'medical'
+          ? (mode === 'history' ? 0.32 : 0.48)
+          : (mode === 'history' ? 0.2 : 0.32),
       })
+        .on('add', () => {
+          if (sev === 'medical') ensureMedicalMarkerStripePattern();
+        })
         // Right-click → open in Google Maps (useful on desktop)
         .on('contextmenu', () => {
           const activeIncident = marker.incidentData || incident;
