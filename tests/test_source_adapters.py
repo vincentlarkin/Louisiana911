@@ -31,6 +31,42 @@ class SourceAdapterTests(unittest.TestCase):
         self.assertEqual("14200 S HARRELL'S FERRY RD", street)
         self.assertEqual("WOODBROOK DR / MILLERVILLE RD", cross_streets)
 
+    def test_baton_rouge_merges_the_official_traffic_map_point(self):
+        incidents = [
+            {
+                "description": "TRAFFIC CONGESTION BLOCKAGE",
+                "street": "281 W INTERSTATE 12 HWY",
+                "cross_streets": "SHERWOOD FOREST / DRUSILLA-JEFFERSON",
+            },
+            {
+                "description": "HIT AND RUN",
+                "street": "6601 - 6799 KLEINPETER RD",
+                "cross_streets": "SAINT CLAUDE AVE / SAINT PETER AVE",
+            },
+        ]
+        features = [{
+            "attributes": {
+                "INCIDENT_TYPE_DESC": "TRAFFIC CONGESTION BLOCKAGE",
+                "ADDRESS": "281 W INTERSTATE 12 HWY",
+                "CROSS_STREET": "SHERWOOD FOREST/DRUSILLA-JEFFERSON",
+                "LAT": 30.42386,
+                "LON": -91.07526,
+            },
+            "geometry": {
+                "x": -91.07529920339584,
+                "y": 30.42394156754017,
+            },
+        }]
+
+        batonrouge._merge_published_points(incidents, features)
+
+        self.assertAlmostEqual(30.42394156754017, incidents[0]["latitude"])
+        self.assertAlmostEqual(-91.07529920339584, incidents[0]["longitude"])
+        self.assertTrue(incidents[0]["coordinates_published"])
+        self.assertTrue(incidents[0]["location_is_approximate"])
+        self.assertNotIn("latitude", incidents[1])
+        self.assertTrue(incidents[1]["location_is_approximate"])
+
     def test_new_orleans_uses_only_published_coordinates(self):
         incident = neworleans._normalize_row(
             {

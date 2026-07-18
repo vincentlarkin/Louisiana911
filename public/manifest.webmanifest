@@ -4,10 +4,27 @@
   "id": "/",
   "start_url": "/",
   "scope": "/",
+  "lang": "en-US",
+  "dir": "ltr",
   "display": "standalone",
   "background_color": "#0a0a0f",
   "theme_color": "#0a0a0f",
   "description": "Public emergency incident feeds and calls for service from across Louisiana.",
+  "categories": ["news", "utilities"],
+  "shortcuts": [
+    {
+      "name": "Latest Incidents",
+      "short_name": "Latest",
+      "url": "/",
+      "icons": [{ "src": "/images/louisiana911-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Monthly Reports",
+      "short_name": "Reports",
+      "url": "/reports/monthly/",
+      "icons": [{ "src": "/images/louisiana911-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ],
   "icons": [
     {
       "src": "/images/louisiana911-icon-192.png",

@@ -10,7 +10,7 @@ Citizen-built Louisiana emergency incident monitor combining official live feeds
 
 - **Collects** official public feeds from Caddo, Baton Rouge, Lafayette, and New Orleans
 - **Displays** incidents on an interactive dark-themed map with color-coded markers
-- **Supports source tabs**: `All`, `Caddo`, `Baton Rouge`, `Lafayette (Beta)`, and `New Orleans (Daily)` in Latest and History views
+- **Supports source tabs**: `All`, `Caddo`, `Baton Rouge`, `Lafayette`, and `New Orleans (Daily)` in Latest and History views
 - **Groups incidents by source** in `All` mode (not interleaved)
 - **Filters** by agency and urgency/severity
 - **Caches** incidents to SQLite for live + historical views
@@ -120,7 +120,7 @@ This repo also includes wiki pages in `wiki/`:
 
 1. **Collection**: Uses source adapters in `sources/` (`caddo` + `batonrouge` + `lafayette` + `neworleans`) to fetch and normalize incidents into one shared data shape. New Orleans is an official delayed daily dataset and is labeled accordingly.
 2. **Deduplication**: Each incident gets a source-aware hash based on source, agency, time, description, and location.
-3. **Geocoding**: Validates actual road intersections from ArcGIS provider metadata. Two cross streets are treated as endpoints bracketing the named street, and their midpoint is used when both endpoints validate. For New Orleans records with `POINT(0 0)`, the importer can map the published block/intersection text as an explicitly approximate location while preserving the original public label. Unverified provider guesses are not mapped.
+3. **Geocoding**: Validates actual road intersections from ArcGIS provider metadata. Two cross streets are treated as endpoints bracketing the named street, and their midpoint is used when both endpoints validate. Baton Rouge rows are enriched with the City-Parish traffic map's own approximate geometry when available, with validated address-range and corridor fallbacks when that map layer lags. For New Orleans records with `POINT(0 0)`, the importer can map the published block/intersection text as an explicitly approximate location while preserving the original public label. Unverified provider guesses are not mapped.
 4. **Storage**: Incidents stored in `caddo911.db` (SQLite) with source, timestamps, and active/inactive status.
 5. **Archiving**: Inactive incidents older than `LOUISIANA911_ARCHIVE_DAYS` move to the existing compatible `caddo911_archive_YYYY_MM.db` files.
 6. **Backup snapshots**: Weekly SQLite-consistent snapshots are written to `backups/` (configurable).
@@ -147,8 +147,8 @@ This app currently ingests from:
   `https://ias.ecc.caddo911.com/All_ActiveEvents.aspx`
 - City of Baton Rouge traffic incidents page:  
   `https://city.brla.gov/traffic/incidents.asp`
-- Lafayette Parish traffic feed endpoint (beta integration):  
-  `https://lafayette911.org/wp-json/traffic-feed/v1/data`
+- City-Parish EBRGIS traffic-incident map layer (approximate published points): `https://maps.brla.gov/gis/rest/services/Transportation/Traffic_Incident/MapServer/0`
+- Lafayette Parish traffic feed endpoint: `https://lafayette911.org/wp-json/traffic-feed/v1/data`
 - City of New Orleans / NOPD Calls for Service dataset supplied by OPCD (daily):
   `https://data.nola.gov/resource/es9j-6y5d.json`
 
@@ -206,7 +206,7 @@ Crime-preservation rule: if one of those generic final types has a non-generic `
 ## Tips
 
 - **Geocoding improves over time**: The app stores a geocoder version with each result. Active rows made by an older algorithm are re-checked automatically (no DB wipe required); use `python app.py --regeocode` to refresh inactive rows in the main database.
-- **Choose source scope**: Use `All`, `Caddo`, `Baton Rouge`, `Lafayette (Beta)`, or `New Orleans (Daily)` to control which feed is visible.
+- **Choose source scope**: Use `All`, `Caddo`, `Baton Rouge`, `Lafayette`, or `New Orleans (Daily)` to control which feed is visible.
 - **Filter incidents**: Use filter buttons to focus on agency types and urgency/severity.
 - **Historical view**: Switch to "History" tab and select a date to browse past incidents
 

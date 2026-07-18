@@ -27,12 +27,18 @@
       padding: 0;
       box-sizing: border-box;
     }
+
+    html {
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
     
     body {
       font-family: 'Space Grotesk', sans-serif;
       background: var(--bg-dark);
       color: var(--text);
       min-height: 100vh;
+      min-height: 100dvh;
       overflow-x: hidden;
       color-scheme: dark;
       -webkit-font-smoothing: antialiased;
@@ -41,6 +47,13 @@
     button,
     input {
       font: inherit;
+    }
+
+    button,
+    a,
+    summary {
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
     }
 
     button:focus-visible,
@@ -284,6 +297,7 @@
       display: grid;
       grid-template-columns: minmax(0, 1fr) 380px;
       height: calc(100vh - var(--header-height));
+      height: calc(100dvh - var(--header-height));
       min-height: 0;
     }
 
@@ -623,16 +637,6 @@
       border-color: rgba(255, 59, 59, 0.3);
       box-shadow: none;
       background: rgba(255, 59, 59, 0.12);
-    }
-
-    .beta-pill {
-      font-size: 8px;
-      line-height: 1;
-      padding: 2px 4px;
-      border-radius: 4px;
-      border: 1px solid rgba(255, 184, 48, 0.45);
-      color: var(--amber);
-      background: rgba(255, 184, 48, 0.12);
     }
 
     .daily-pill {
@@ -2809,7 +2813,7 @@
 
     @media (max-width: 720px) {
       :root {
-        --header-height: calc(110px + env(safe-area-inset-top));
+        --header-height: calc(114px + env(safe-area-inset-top));
       }
 
       body {
@@ -2954,7 +2958,7 @@
       .status-bar {
         width: 100%;
         flex-wrap: nowrap;
-        gap: 6px;
+        gap: 5px;
         justify-content: flex-start;
         align-items: flex-end;
         min-width: 0;
@@ -2991,7 +2995,7 @@
       }
 
       .source-tab {
-        min-height: 32px;
+        min-height: 36px;
         font-size: 9px;
         padding: 6px 8px;
       }
@@ -3019,9 +3023,9 @@
       }
 
       .location-btn {
-        min-width: 32px;
-        width: 32px;
-        height: 30px;
+        min-width: 34px;
+        width: 34px;
+        height: 34px;
         padding: 0;
       }
 
@@ -3030,8 +3034,8 @@
       }
 
       .settings-btn {
-        width: 30px;
-        height: 30px;
+        width: 34px;
+        height: 34px;
         margin-left: auto;
         border-radius: 7px;
       }
@@ -3042,8 +3046,8 @@
       }
 
       .info-btn {
-        width: 30px;
-        height: 30px;
+        width: 34px;
+        height: 34px;
         margin-left: 0;
         border-radius: 7px;
       }

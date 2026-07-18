@@ -1,16 +1,48 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-US">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>About Louisiana 911 &amp; Caddo 911 Coverage | Louisiana911</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>About Louisiana911 | Louisiana &amp; Caddo 911 Coverage</title>
   <meta name="description" content="Learn how Louisiana911 combines official Caddo 911, Baton Rouge, Lafayette, and New Orleans public incident feeds with transparent location accuracy.">
-  <meta name="robots" content="index,follow">
+  <meta name="robots" content="index,follow,max-image-preview:large">
   <link rel="canonical" href="https://louisiana911.com/about/">
   <meta name="theme-color" content="#0a0a0f">
+  <meta name="color-scheme" content="dark">
+  <meta name="application-name" content="Louisiana911">
+  <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/images/louisiana911-icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="/images/louisiana911-icon-192.png">
-  <link rel="manifest" href="/manifest.webmanifest?v=4.0.3">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.1.0">
+  <meta property="og:title" content="About Louisiana911 | Louisiana &amp; Caddo 911 Coverage">
+  <meta property="og:description" content="How Louisiana911 combines official public incident feeds while keeping delays, filters, and location uncertainty visible.">
+  <meta property="og:image" content="https://louisiana911.com/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1733">
+  <meta property="og:image:height" content="908">
+  <meta property="og:image:alt" content="Louisiana 911 public emergency incident monitor">
+  <meta property="og:url" content="https://louisiana911.com/about/">
+  <meta property="og:site_name" content="Louisiana911">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="About Louisiana911">
+  <meta name="twitter:description" content="Sources, timing, filters, and location methodology for Louisiana911.">
+  <meta name="twitter:image" content="https://louisiana911.com/og.png">
+  <meta name="twitter:image:alt" content="Louisiana 911 public emergency incident monitor">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "AboutPage",
+    "name": "About Louisiana911",
+    "url": "https://louisiana911.com/about/",
+    "description": "Sources, timing, filters, and location methodology for Louisiana911.",
+    "inLanguage": "en-US",
+    "isPartOf": { "@id": "https://louisiana911.com/#website" }
+  }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -28,6 +60,8 @@
     body {
       margin: 0;
       min-height: 100vh;
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
       background:
         radial-gradient(circle at 12% 8%, rgba(94, 158, 255, 0.12), transparent 30%),
         radial-gradient(circle at 88% 12%, rgba(255, 77, 85, 0.10), transparent 30%),
@@ -36,7 +70,7 @@
       font-family: 'JetBrains Mono', monospace;
     }
     a { color: inherit; }
-    .shell { width: min(920px, calc(100vw - 28px)); margin: 0 auto; padding: 24px 0 52px; }
+    .shell { width: min(920px, calc(100vw - 28px)); margin: 0 auto; padding: 24px 0 calc(52px + env(safe-area-inset-bottom)); }
     .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 36px; }
     .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; font-family: 'Space Grotesk', sans-serif; font-weight: 700; }
     .mark { display: block; width: 44px; height: 44px; border: 1px solid rgba(255,77,85,.32); border-radius: 11px; background: #0a0a0f; object-fit: contain; box-shadow: 0 5px 18px rgba(0,0,0,.34); }
@@ -91,11 +125,11 @@
       </article>
       <article class="source">
         <h2>Baton Rouge</h2><span class="cadence">Live traffic</span>
-        <p>Current traffic incidents published by the City of Baton Rouge and Parish of East Baton Rouge.</p>
+        <p>Current traffic incidents and approximate map points published by the City of Baton Rouge and Parish of East Baton Rouge.</p>
         <a href="https://city.brla.gov/traffic/incidents.asp" rel="noopener noreferrer">Official Baton Rouge feed</a>
       </article>
       <article class="source">
-        <h2>Lafayette Parish</h2><span class="cadence">Live traffic · Beta</span>
+        <h2>Lafayette Parish</h2><span class="cadence">Live traffic</span>
         <p>Current traffic conditions published by the Lafayette Parish Communication District.</p>
         <a href="https://lafayette911.org/traffic/" rel="noopener noreferrer">Official Lafayette feed</a>
       </article>
@@ -108,6 +142,7 @@
 
     <section class="privacy">
       <h2>Location uncertainty stays visible.</h2>
+      <p>Baton Rouge traffic incidents use the approximate point published by the City-Parish traffic map when one is available. If that map layer lags the incident list, Louisiana911 may derive an approximate marker from the published address range or cross-street corridor.</p>
       <p>Louisiana911 preserves the public location label supplied by each source. When New Orleans publishes a block or intersection but supplies <code>POINT(0 0)</code> instead of a usable map point, the site may derive an approximate marker from that same public text. Those markers are larger, dashed, and explicitly labeled approximate; the displayed address is never made more specific than NOPD's published label.</p>
     </section>
 

@@ -1,52 +1,81 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-US">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Louisiana 911 Calls &amp; Live Incident Map | Louisiana911</title>
-  <meta name="description" content="Track public 911 and emergency incident feeds across Louisiana, including Caddo, Baton Rouge, Lafayette, and New Orleans calls for service.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Louisiana 911 Calls &amp; Caddo 911 Live Map | Louisiana911</title>
+  <meta name="description" content="View Louisiana 911 public incident feeds on one map, including live Caddo 911 calls, Baton Rouge and Lafayette traffic incidents, and daily NOPD calls.">
   <meta name="robots" content="index,follow,max-image-preview:large">
   <link rel="canonical" href="https://louisiana911.com/">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/images/louisiana911-icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="/images/louisiana911-icon-192.png">
-  <link rel="manifest" href="/manifest.webmanifest?v=4.0.3">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.1.0">
   <meta name="theme-color" content="#0a0a0f">
+  <meta name="color-scheme" content="dark">
+  <meta name="application-name" content="Louisiana911">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Louisiana911">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta property="og:title" content="Louisiana 911 Calls &amp; Live Incident Map">
-  <meta property="og:description" content="Public emergency incident feeds from Caddo, Baton Rouge, Lafayette, and New Orleans on one Louisiana map.">
+  <meta property="og:title" content="Louisiana 911 Calls &amp; Caddo 911 Live Map">
+  <meta property="og:description" content="Live Caddo 911 calls, Baton Rouge and Lafayette traffic incidents, and daily NOPD calls on one public Louisiana map.">
   <meta property="og:image" content="https://louisiana911.com/og.png">
+  <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1733">
   <meta property="og:image:height" content="908">
   <meta property="og:image:alt" content="Louisiana 911 public emergency incident monitor">
   <meta property="og:url" content="https://louisiana911.com/">
   <meta property="og:site_name" content="Louisiana911">
+  <meta property="og:locale" content="en_US">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Louisiana 911 Calls &amp; Live Incident Map">
-  <meta name="twitter:description" content="Public emergency incident feeds from across Louisiana on one map.">
+  <meta name="twitter:title" content="Louisiana 911 Calls &amp; Caddo 911 Live Map">
+  <meta name="twitter:description" content="Live and daily public emergency incident feeds from across Louisiana on one map.">
   <meta name="twitter:image" content="https://louisiana911.com/og.png">
+  <meta name="twitter:image:alt" content="Louisiana 911 public emergency incident monitor">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "WebSite",
-    "name": "Louisiana911",
-    "alternateName": ["Louisiana 911", "Caddo 911 Monitor"],
-    "url": "https://louisiana911.com/",
-    "description": "A citizen-run monitor of official public emergency incident feeds across Louisiana.",
-    "inLanguage": "en-US",
-    "isAccessibleForFree": true,
-    "creator": {
-      "@type": "Person",
-      "name": "Vincent Larkin",
-      "url": "https://vincentlarkin.com"
-    }
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://louisiana911.com/#organization",
+        "name": "Louisiana911",
+        "alternateName": ["Louisiana 911", "Caddo 911 Monitor"],
+        "url": "https://louisiana911.com/",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://louisiana911.com/images/louisiana911-icon-512.png",
+          "width": 512,
+          "height": 512
+        },
+        "description": "A citizen-run public emergency incident transparency project for Louisiana.",
+        "founder": {
+          "@type": "Person",
+          "name": "Vincent Larkin",
+          "url": "https://vincentlarkin.com"
+        }
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://louisiana911.com/#website",
+        "name": "Louisiana911",
+        "alternateName": ["Louisiana 911", "Caddo 911 Monitor"],
+        "url": "https://louisiana911.com/",
+        "description": "Official public incident feeds from Caddo, Baton Rouge, Lafayette, and New Orleans on one Louisiana map.",
+        "inLanguage": "en-US",
+        "isAccessibleForFree": true,
+        "publisher": { "@id": "https://louisiana911.com/#organization" }
+      }
+    ]
   }
   </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.0.3" />
+  <link rel="stylesheet" href="styles.css?v=4.1.0" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -79,17 +108,17 @@
         </div>
       </div>
       <div class="status-item status-location">
-        <button class="location-btn" id="location-btn" title="Show my location" aria-label="Show my location on the map">
+        <button class="location-btn" id="location-btn" type="button" title="Show my location" aria-label="Show my location on the map">
           <svg class="map-location-icon" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M20.7 3.3 3.8 10.6c-.7.3-.6 1.3.1 1.5l7 1.8 1.8 7c.2.7 1.2.8 1.5.1l7.3-16.9c.3-.6-.3-1.2-.8-.8Z"/>
           </svg>
           <span class="location-label">My Location</span>
         </button>
       </div>
-      <button class="settings-btn" id="settings-btn" onclick="toggleSettingsPanel()" title="Settings" aria-label="Settings">
+      <button class="settings-btn" id="settings-btn" type="button" onclick="toggleSettingsPanel()" title="Settings" aria-label="Settings">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
         </button>
-      <button class="info-btn" onclick="toggleInfoPanel()" title="About" aria-label="About">i</button>
+      <button class="info-btn" type="button" onclick="toggleInfoPanel()" title="About" aria-label="About">i</button>
     </div>
   </header>
   
@@ -147,7 +176,7 @@
               </a>
               <a href="https://lafayette911.org/traffic/" target="_blank" class="info-link" rel="noopener noreferrer">
                 <img src="images/lafayette-police.png" alt="Lafayette Parish Communication District traffic feed" class="info-link-icon">
-                Lafayette Parish Feed (Beta)
+                Lafayette Parish Feed
               </a>
               <a href="https://data.nola.gov/Public-Safety-and-Preparedness/Calls-for-Service-2026/es9j-6y5d" target="_blank" class="info-link" rel="noopener noreferrer">
                 <span class="info-link-badge">NOPD</span>
@@ -155,15 +184,15 @@
               </a>
             </div>
           </details>
-          <a href="https://github.com/vincentlarkin/Caddo911-Monitor" target="_blank" class="info-link">
+          <a href="https://github.com/vincentlarkin/Caddo911-Monitor" target="_blank" class="info-link" rel="noopener noreferrer">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
             GitHub
           </a>
-          <a href="https://vincentlarkin.com" target="_blank" class="info-link">
+          <a href="https://vincentlarkin.com" target="_blank" class="info-link" rel="noopener noreferrer">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
             Website
           </a>
-          <a href="https://linkedin.com/in/vincentwlarkin" target="_blank" class="info-link">
+          <a href="https://linkedin.com/in/vincentwlarkin" target="_blank" class="info-link" rel="noopener noreferrer">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
             LinkedIn
           </a>
@@ -177,7 +206,7 @@
           </a>
         </div>
         <p class="info-credit">Made by <a class="info-credit-link" href="mailto:vincent@vincentlarkin.com">Vincent Larkin</a></p>
-        <p class="info-version">v4.0.3</p>
+        <p class="info-version">v4.1.0</p>
       </div>
     </div>
   </div>
@@ -252,19 +281,17 @@
     
     <aside class="sidebar">
       <div class="tabs">
-        <button class="tab active" data-tab="live">Latest</button>
-        <button class="tab" data-tab="history">History</button>
+        <button class="tab active" type="button" data-tab="live">Latest</button>
+        <button class="tab" type="button" data-tab="history">History</button>
         <button class="panel-toggle" id="panel-toggle" type="button" aria-expanded="true" aria-label="Toggle incidents panel" title="Collapse incidents">▼</button>
       </div>
 
       <div class="source-tabs" id="source-tabs" aria-label="Incident source">
-        <button class="source-tab active" data-source="all" title="Show all sources">All</button>
-        <button class="source-tab" data-source="caddo" title="Show only Caddo incidents">Caddo</button>
-        <button class="source-tab" data-source="batonrouge" title="Show only Baton Rouge incidents">Baton Rouge</button>
-        <button class="source-tab" data-source="lafayette" title="Show only Lafayette incidents">
-          Lafayette <span class="beta-pill">Beta</span>
-        </button>
-        <button class="source-tab" data-source="neworleans" title="Show the latest published New Orleans calls for service">
+        <button class="source-tab active" type="button" data-source="all" title="Show all sources">All</button>
+        <button class="source-tab" type="button" data-source="caddo" title="Show only Caddo incidents">Caddo</button>
+        <button class="source-tab" type="button" data-source="batonrouge" title="Show only Baton Rouge incidents">Baton Rouge</button>
+        <button class="source-tab" type="button" data-source="lafayette" title="Show only Lafayette incidents">Lafayette</button>
+        <button class="source-tab" type="button" data-source="neworleans" title="Show the latest published New Orleans calls for service">
           New Orleans <span class="daily-pill">Daily</span>
         </button>
       </div>
@@ -279,60 +306,60 @@
         <div class="filter-rows">
           <!-- Caddo unit filters -->
           <div class="filter-group agency-group agency-group-caddo hidden" data-filter-type="agency-caddo">
-            <button class="filter-btn active" data-filter="all" title="All Caddo units">All</button>
-            <button class="filter-btn" data-filter="cadfd" title="Caddo Fire/EMS">
+            <button class="filter-btn active" type="button" data-filter="all" title="All Caddo units">All</button>
+            <button class="filter-btn" type="button" data-filter="cadfd" title="Caddo Fire/EMS">
               <img src="images/cfd-fire.png" alt="CAD-FD/EMS" class="filter-logo">
             </button>
-            <button class="filter-btn" data-filter="shvfd" title="Shreveport Fire">
+            <button class="filter-btn" type="button" data-filter="shvfd" title="Shreveport Fire">
               <img src="images/sfd-fire.png" alt="SHVFD" class="filter-logo">
             </button>
-            <button class="filter-btn" data-filter="police" title="Shreveport Police">
+            <button class="filter-btn" type="button" data-filter="police" title="Shreveport Police">
               <img src="images/spd-police.png" alt="Shreveport Police" class="filter-logo">
             </button>
-            <button class="filter-btn" data-filter="sheriff" title="Caddo Sheriff">
+            <button class="filter-btn" type="button" data-filter="sheriff" title="Caddo Sheriff">
               <img src="images/cso-sheriff.png" alt="Caddo Sheriff" class="filter-logo">
             </button>
           </div>
 
           <!-- Baton Rouge agency filters -->
           <div class="filter-group agency-group agency-group-batonrouge hidden" data-filter-type="agency-batonrouge">
-            <button class="filter-btn active" data-br-agency="all" title="All Baton Rouge agencies">All</button>
-            <button class="filter-btn" data-br-agency="law" title="Law enforcement incidents">LAW</button>
-            <button class="filter-btn" data-br-agency="oss" title="OSS incidents">OSS</button>
+            <button class="filter-btn active" type="button" data-br-agency="all" title="All Baton Rouge agencies">All</button>
+            <button class="filter-btn" type="button" data-br-agency="law" title="Law enforcement incidents">LAW</button>
+            <button class="filter-btn" type="button" data-br-agency="oss" title="OSS incidents">OSS</button>
           </div>
 
           <!-- Lafayette unit filters -->
           <div class="filter-group agency-group agency-group-lafayette hidden" data-filter-type="agency-lafayette">
-            <button class="filter-btn active" data-laf-unit="all" title="All Lafayette units">All</button>
-            <button class="filter-btn" data-laf-unit="police" title="Lafayette Police">
+            <button class="filter-btn active" type="button" data-laf-unit="all" title="All Lafayette units">All</button>
+            <button class="filter-btn" type="button" data-laf-unit="police" title="Lafayette Police">
               <img src="images/lafayette-police.png" alt="Lafayette Police" class="filter-logo">
             </button>
-            <button class="filter-btn" data-laf-unit="sheriff" title="Lafayette Sheriff">
+            <button class="filter-btn" type="button" data-laf-unit="sheriff" title="Lafayette Sheriff">
               <img src="images/lafayette-sheriff.png" alt="Lafayette Sheriff" class="filter-logo">
             </button>
-            <button class="filter-btn" data-laf-unit="fire" title="Lafayette Fire">
+            <button class="filter-btn" type="button" data-laf-unit="fire" title="Lafayette Fire">
               <img src="images/lafayette-fire.png" alt="Lafayette Fire" class="filter-logo">
             </button>
           </div>
           <!-- Urgency/Severity filters -->
           <div class="filter-group" data-filter-type="urgency">
-            <button class="filter-btn urgency-btn active" data-urgency="all" title="All severity levels">All</button>
-            <button class="filter-btn urgency-btn urgency-high" data-urgency="high" title="High severity">
+            <button class="filter-btn urgency-btn active" type="button" data-urgency="all" title="All severity levels">All</button>
+            <button class="filter-btn urgency-btn urgency-high" type="button" data-urgency="high" title="High severity">
               <span class="urgency-dot"></span>
             </button>
-            <button class="filter-btn urgency-btn urgency-medical" data-urgency="medical" title="Medical/EMS">
+            <button class="filter-btn urgency-btn urgency-medical" type="button" data-urgency="medical" title="Medical/EMS">
               <span class="urgency-dot"></span>
             </button>
-            <button class="filter-btn urgency-btn urgency-medium" data-urgency="medium" title="Medium severity">
+            <button class="filter-btn urgency-btn urgency-medium" type="button" data-urgency="medium" title="Medium severity">
               <span class="urgency-dot"></span>
             </button>
-            <button class="filter-btn urgency-btn urgency-low" data-urgency="low" title="Low severity">
+            <button class="filter-btn urgency-btn urgency-low" type="button" data-urgency="low" title="Low severity">
               <span class="urgency-dot"></span>
             </button>
-            <button class="filter-btn urgency-btn urgency-service" data-urgency="service" title="Public service">
+            <button class="filter-btn urgency-btn urgency-service" type="button" data-urgency="service" title="Public service">
               <span class="urgency-dot"></span>
             </button>
-            <button class="filter-btn urgency-btn urgency-custody" data-urgency="custody" title="Custody/Prisoner">
+            <button class="filter-btn urgency-btn urgency-custody" type="button" data-urgency="custody" title="Custody/Prisoner">
               <span class="urgency-dot"></span>
             </button>
           </div>
@@ -974,7 +1001,7 @@
     function sourceLabel(source) {
       if (source === 'all') return 'All';
       if (source === 'batonrouge') return 'Baton Rouge';
-      if (source === 'lafayette') return 'Lafayette (Beta)';
+      if (source === 'lafayette') return 'Lafayette';
       if (source === 'neworleans') return 'New Orleans (Daily)';
       return 'Caddo';
     }
@@ -1461,6 +1488,20 @@
         /^\s*approx(?:imate)?\s+loc(?:ation)?\s*:/i.test(street);
     }
 
+    function approximateLocationExplanation(incident) {
+      const source = normalizeSource(incident?.source);
+      const geocodeSource = String(incident?.geocode_source || '').toLowerCase();
+      if (source === 'batonrouge') {
+        return geocodeSource === 'source-feed'
+          ? 'Approximate point published by the City-Parish traffic map.'
+          : 'Approximate placement derived from the public Baton Rouge address or cross-street range.';
+      }
+      if (source === 'neworleans') {
+        return 'Approximate placement derived from the block or intersection published by NOPD.';
+      }
+      return 'Approximate placement derived from the public source location.';
+    }
+
     const MAP_COORDINATE_BOUNDS = {
       minLat: 28.7,
       maxLat: 34.5,
@@ -1763,7 +1804,7 @@
         ${approximate ? `
         <div class="incident-modal-detail approximate-location-detail">
           <span class="incident-modal-label">Map accuracy</span>
-          <span class="incident-modal-value">Approximate placement derived from the block or intersection published by NOPD.</span>
+          <span class="incident-modal-value">${escapeHtml(approximateLocationExplanation(incident))}</span>
         </div>` : ''}
         <div class="incident-modal-detail">
           <span class="incident-modal-label">Time</span>
@@ -3042,14 +3083,22 @@
       });
     });
 
-    mobileQuery.addEventListener('change', syncMobilePanel);
-    coarsePointerQuery.addEventListener('change', syncMobilePanel);
+    function listenForMediaQueryChange(query, handler) {
+      if (typeof query.addEventListener === 'function') {
+        query.addEventListener('change', handler);
+      } else if (typeof query.addListener === 'function') {
+        query.addListener(handler);
+      }
+    }
+
+    listenForMediaQueryChange(mobileQuery, syncMobilePanel);
+    listenForMediaQueryChange(coarsePointerQuery, syncMobilePanel);
     window.addEventListener('load', syncMobilePanel);
     syncMobilePanel();
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.0.3', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.1.0', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
