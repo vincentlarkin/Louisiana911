@@ -234,6 +234,108 @@ class GeocodingTests(unittest.TestCase):
         self.assertAlmostEqual(30.187287703244, result["lat"])
         self.assertEqual(query, fake.calls[0][0])
 
+    def test_baton_rouge_address_range_uses_validated_endpoint_midpoint(self):
+        start_query = (
+            "6601 KLEINPETER RD, Baton Rouge, East Baton Rouge Parish, LA"
+        )
+        end_query = (
+            "6799 KLEINPETER RD, Baton Rouge, East Baton Rouge Parish, LA"
+        )
+        fake = FakeArcGIS({
+            start_query: [FakeLocation(
+                "6601 Kleinpeter Rd, Baton Rouge, Louisiana, 70811",
+                30.552636059355,
+                -91.123734240595,
+                address_type="StreetAddress",
+                attributes={
+                    "AddNum": "6601",
+                    "StName": "Kleinpeter",
+                    "StType": "Rd",
+                },
+            )],
+            end_query: [FakeLocation(
+                "6799 Kleinpeter Rd, Baton Rouge, Louisiana, 70811",
+                30.552702440564,
+                -91.121762512005,
+                address_type="StreetAddress",
+                attributes={
+                    "AddNum": "6799",
+                    "StName": "Kleinpeter",
+                    "StType": "Rd",
+                },
+            )],
+        })
+        app.geolocator_arcgis = fake
+
+        result = app.geocode_address(
+            "6601 - 6799 KLEINPETER RD",
+            "SAINT CLAUDE AVE / SAINT PETER AVE",
+            "Baton Rouge",
+            source="batonrouge",
+        )
+
+        self.assertEqual("approximate-address-range", result["quality"])
+        self.assertAlmostEqual(30.5526692499595, result["lat"], places=8)
+        self.assertAlmostEqual(-91.1227483763, result["lng"], places=8)
+        self.assertEqual([start_query, end_query], [call[0] for call in fake.calls])
+
+    def test_baton_rouge_route_reference_and_corridor_label_are_normalized(self):
+        sherwood_query = (
+            "W INTERSTATE 12 HWY & SHERWOOD FOREST, "
+            "Baton Rouge, East Baton Rouge Parish, LA"
+        )
+        drusilla_query = (
+            "W INTERSTATE 12 HWY & DRUSILLA LN, "
+            "Baton Rouge, East Baton Rouge Parish, LA"
+        )
+        route_attributes = {
+            "StPreDir1": "W",
+            "StPreType1": "Interstate",
+            "StName1": "12",
+            "StType1": "Hwy",
+        }
+        fake = FakeArcGIS({
+            sherwood_query: [FakeLocation(
+                "W Interstate 12 Hwy & S Sherwood Forest Blvd, Baton Rouge, LA",
+                30.4302279886,
+                -91.056553018771,
+                address_type="StreetInt",
+                attributes={
+                    **route_attributes,
+                    "StPreDir2": "S",
+                    "StName2": "Sherwood Forest",
+                    "StType2": "Blvd",
+                },
+            )],
+            drusilla_query: [FakeLocation(
+                "W Interstate 12 Hwy & Drusilla Ln, Baton Rouge, LA",
+                30.41786350795,
+                -91.089580315673,
+                address_type="StreetInt",
+                attributes={
+                    **route_attributes,
+                    "StName2": "Drusilla",
+                    "StType2": "Ln",
+                },
+            )],
+        })
+        app.geolocator_arcgis = fake
+
+        result = app.geocode_address(
+            "281 W INTERSTATE 12 HWY",
+            "SHERWOOD FOREST / DRUSILLA-JEFFERSON",
+            "Baton Rouge",
+            source="batonrouge",
+        )
+
+        self.assertEqual("street-segment", result["quality"])
+        self.assertAlmostEqual(30.424045748275, result["lat"], places=8)
+        self.assertAlmostEqual(-91.073066667222, result["lng"], places=8)
+        self.assertEqual(
+            [sherwood_query, drusilla_query],
+            [call[0] for call in fake.calls],
+        )
+
     def test_arcgis_caddo_metadata_allows_valid_near_edge_intersection(self):
         query = (
             "MAYFAIR & HEATHERWOOD DR, "
@@ -469,6 +571,63 @@ class GeocodingTests(unittest.TestCase):
                 ).fetchone()
                 conn.close()
                 self.assertEqual(1, row["units"])
+        finally:
+            app.DB_PATH = original_db_path
+
+    def test_baton_rouge_published_point_replaces_same_version_fallback(self):
+        incident = {
+            "source": "batonrouge",
+            "agency": "LAW",
+            "time": "0701",
+            "units": 1,
+            "description": "TRAFFIC CONGESTION BLOCKAGE",
+            "street": "281 W INTERSTATE 12 HWY",
+            "cross_streets": "SHERWOOD FOREST / DRUSILLA-JEFFERSON",
+            "municipality": "Baton Rouge",
+            "location_is_approximate": True,
+        }
+
+        original_db_path = app.DB_PATH
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                app.DB_PATH = os.path.join(tmp_dir, "louisiana911.db")
+                app.init_db()
+                with patch.object(app, "geocode_address", return_value={
+                    "lat": 30.424045748275,
+                    "lng": -91.073066667222,
+                    "source": "arcgis",
+                    "quality": "street-segment",
+                    "query": "validated corridor midpoint",
+                    "provider_responded": True,
+                }):
+                    app.process_incidents([dict(incident)], source="batonrouge")
+
+                published = dict(incident)
+                published.update({
+                    "latitude": 30.42394156754017,
+                    "longitude": -91.07529920339584,
+                    "coordinates_published": True,
+                })
+                with patch.object(
+                    app,
+                    "geocode_address",
+                    side_effect=AssertionError("published point should bypass geocoding"),
+                ) as geocode_mock:
+                    app.process_incidents([published], source="batonrouge")
+                    geocode_mock.assert_not_called()
+
+                conn = app.db_connect(row_factory=True)
+                row = conn.execute(
+                    "SELECT latitude, longitude, geocode_source, geocode_quality "
+                    "FROM incidents WHERE hash = ?",
+                    (app.hash_incident(incident),),
+                ).fetchone()
+                conn.close()
+
+                self.assertAlmostEqual(30.42394156754017, row["latitude"])
+                self.assertAlmostEqual(-91.07529920339584, row["longitude"])
+                self.assertEqual("source-feed", row["geocode_source"])
+                self.assertEqual("approximate-published", row["geocode_quality"])
         finally:
             app.DB_PATH = original_db_path
 

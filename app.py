@@ -18,7 +18,7 @@ import json
 from difflib import SequenceMatcher
 from datetime import datetime, timezone, timedelta
 from threading import Lock, Thread
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, redirect, request, send_from_directory
 from geopy.geocoders import Nominatim
 from apscheduler.schedulers.background import BackgroundScheduler
 from zoneinfo import ZoneInfo
@@ -655,7 +655,7 @@ def _unauthorized():
     resp = jsonify({'error': 'unauthorized'})
     resp.status_code = 401
     if AUTH_USER and AUTH_PASS:
-        resp.headers['WWW-Authenticate'] = 'Basic realm="caddo911-live"'
+        resp.headers['WWW-Authenticate'] = 'Basic realm="louisiana911-live"'
     return resp
 
 def _check_auth() -> bool:
@@ -767,8 +767,10 @@ geocode_intersection_cache = {}
 
 # Increment whenever stored coordinates need to be reconsidered because the
 # validation/ranking algorithm changed. Version 4 removed CAD-only road
-# discriminators; version 5 adds validated NOPD block/intersection fallbacks.
-GEOCODER_VERSION = 5
+# discriminators; version 5 added validated NOPD block/intersection fallbacks;
+# version 6 adds Baton Rouge address-range and corridor normalization plus
+# official City-Parish traffic-map point enrichment.
+GEOCODER_VERSION = 6
 ARCGIS_INTERSECTION_MIN_SCORE = 90.0
 ARCGIS_STREET_MIN_SCORE = 85.0
 ARCGIS_ADDRESS_MIN_SCORE = 90.0
@@ -1327,6 +1329,46 @@ def _split_numbered_address(value: str | None) -> tuple[str, str] | None:
     return match.group(1).upper(), match.group(2)
 
 
+def _split_numbered_address_range(value: str | None) -> tuple[str, str, str] | None:
+    """Split a CAD block range such as ``6601 - 6799 KLEINPETER RD``."""
+    match = re.match(
+        r"^\s*(\d+[A-Z]?)\s*-\s*(\d+[A-Z]?)\s+(.+?)\s*$",
+        _clean_ws(value or ""),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return match.group(1).upper(), match.group(2).upper(), _clean_ws(match.group(3))
+
+
+BATON_ROUGE_CROSS_STREET_ALIASES = {
+    # EBR CAD uses this corridor label for the Drusilla/Jefferson end of the
+    # I-12 segment. Drusilla Ln is the road that actually crosses I-12.
+    "DRUSILLA-JEFFERSON": "DRUSILLA LN",
+}
+
+
+def _normalize_baton_rouge_geocode_parts(
+    street: str | None,
+    crosses: list[str],
+) -> tuple[str | None, list[str]]:
+    """Remove EBR CAD route references and expand known corridor labels."""
+    street_clean = _clean_ws(street or "")
+    if street_clean:
+        street_clean = re.sub(
+            r"^\d+\s+(?=(?:[NSEW]\s+)?(?:INTERSTATE\s+\d+|I\s*-?\s*\d+)\b)",
+            "",
+            street_clean,
+            flags=re.IGNORECASE,
+        )
+
+    normalized_crosses = [
+        BATON_ROUGE_CROSS_STREET_ALIASES.get(_clean_ws(cross).upper(), cross)
+        for cross in crosses
+    ]
+    return street_clean or None, normalized_crosses
+
+
 def _arcgis_matches_numbered_address(location, requested_address: str) -> bool:
     requested = _split_numbered_address(requested_address)
     if not requested:
@@ -1546,6 +1588,12 @@ def geocode_address(street, cross_streets, municipality, source: str = 'caddo'):
     cache_locality = locality_variants[0][0] if locality_variants else geo_profile['default_city']
 
     street_clean, crosses = _extract_street_and_crosses(street, cross_streets)
+    address_range = _split_numbered_address_range(street_clean)
+    if source_name == 'batonrouge' and not address_range:
+        street_clean, crosses = _normalize_baton_rouge_geocode_parts(
+            street_clean,
+            crosses,
+        )
     cross1 = crosses[0] if len(crosses) > 0 else None
     cross2 = crosses[1] if len(crosses) > 1 else None
 
@@ -1556,10 +1604,57 @@ def geocode_address(street, cross_streets, municipality, source: str = 'caddo'):
 
     attempt_state = {"provider_responded": False}
 
+    # EBR commonly publishes a block/address range bracketed by two streets.
+    # Validate both numbered endpoints and use their midpoint; if either end
+    # fails, continue below using the named road and the published crosses.
+    if source_name == 'batonrouge' and address_range:
+        range_start, range_end, range_road = address_range
+        start_address = f"{range_start} {range_road}"
+        end_address = f"{range_end} {range_road}"
+        start_match = _find_arcgis_address(
+            start_address,
+            locality_variants,
+            source_name,
+            attempt_state,
+        )
+        end_match = _find_arcgis_address(
+            end_address,
+            locality_variants,
+            source_name,
+            attempt_state,
+        )
+        if start_match and end_match:
+            range_length = _haversine_m(
+                start_match['lat'], start_match['lng'],
+                end_match['lat'], end_match['lng'],
+            )
+            if range_length <= MAX_STREET_SEGMENT_METERS:
+                result = {
+                    'lat': (start_match['lat'] + end_match['lat']) / 2.0,
+                    'lng': (start_match['lng'] + end_match['lng']) / 2.0,
+                    'source': 'arcgis',
+                    'quality': 'approximate-address-range',
+                    'query': f"{start_match['query']} || {end_match['query']}",
+                }
+                geocode_cache[cache_key] = result
+                log(
+                    f"  [ARC] address-range ({range_length:.0f}m) | "
+                    f"{start_address} - {range_end} -> "
+                    f"({result['lat']:.5f}, {result['lng']:.5f})"
+                )
+                return result
+
+        street_clean, crosses = _normalize_baton_rouge_geocode_parts(
+            range_road,
+            crosses,
+        )
+        cross1 = crosses[0] if len(crosses) > 0 else None
+        cross2 = crosses[1] if len(crosses) > 1 else None
+
     # Lafayette and Baton Rouge commonly publish a numbered address plus a
     # nearby cross street. The address is more precise than forcing those
     # fields through intersection matching.
-    if street_clean and _split_numbered_address(street_clean):
+    if street_clean and not address_range and _split_numbered_address(street_clean):
         result = _find_arcgis_address(
             street_clean,
             locality_variants,
@@ -1863,10 +1958,10 @@ def _incident_geocode_result(incident: dict, source_name: str) -> dict:
         and _is_in_source_bounds(latitude, longitude, source_name)
     ):
         is_approximate = bool(
-            source_name == 'neworleans'
-            and (
-                incident.get('location_is_approximate')
-                or NOLA_APPROX_LOCATION_RE.match(_clean_ws(incident.get('street') or ''))
+            incident.get('location_is_approximate')
+            or (
+                source_name == 'neworleans'
+                and NOLA_APPROX_LOCATION_RE.match(_clean_ws(incident.get('street') or ''))
             )
         )
         return {
@@ -1875,7 +1970,7 @@ def _incident_geocode_result(incident: dict, source_name: str) -> dict:
             'source': 'source-feed',
             'quality': 'approximate-published' if is_approximate else 'published',
             'query': (
-                'Official source coordinates; location labeled approximate'
+                'Official source coordinates; source labels location approximate'
                 if is_approximate
                 else 'Official source coordinates'
             ),
@@ -1909,12 +2004,22 @@ def _incident_geocode_result(incident: dict, source_name: str) -> dict:
             result['query'] = 'Approximate from public NOPD block/intersection label'
         return result
 
-    return geocode_address(
+    result = geocode_address(
         incident.get('street'),
         incident.get('cross_streets'),
         incident.get('municipality'),
         source=source_name,
     )
+    if (
+        incident.get('location_is_approximate')
+        and result.get('lat') is not None
+        and result.get('lng') is not None
+    ):
+        result = dict(result)
+        base_quality = str(result.get('quality') or 'location')
+        if not base_quality.startswith('approximate-'):
+            result['quality'] = f"approximate-{base_quality}"
+    return result
 
 def _new_orleans_processing_priority(incident: dict) -> tuple[int, int]:
     """Put visible NOLA rows with official points ahead of slower fallbacks."""
@@ -2075,6 +2180,38 @@ def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: b
                             h,
                         ),
                     )
+                continue
+
+            # Some live adapters can publish their own authoritative map point
+            # after the text row first appears. Re-apply that source point even
+            # when a same-version geocoder fallback already exists.
+            raw_lat = incident.get('latitude')
+            raw_lng = incident.get('longitude')
+            try:
+                has_source_point = _is_in_source_bounds(
+                    float(raw_lat), float(raw_lng), incident_source
+                )
+            except (TypeError, ValueError):
+                has_source_point = False
+            if has_source_point:
+                current_geo = _incident_geocode_result(incident, incident_source)
+                cursor.execute(
+                    '''UPDATE incidents
+                       SET latitude = ?, longitude = ?, geocode_source = ?,
+                           geocode_quality = ?, geocode_query = ?, geocoded_at = ?,
+                           geocode_version = ?
+                       WHERE hash = ?''',
+                    (
+                        current_geo.get('lat'),
+                        current_geo.get('lng'),
+                        current_geo.get('source'),
+                        current_geo.get('quality'),
+                        current_geo.get('query'),
+                        now,
+                        GEOCODER_VERSION,
+                        h,
+                    ),
+                )
                 continue
 
             # Opportunistic re-geocode: if we previously fell back (or have no coords),
@@ -2258,7 +2395,7 @@ def background_scrape():
     source_jobs = [
         ('caddo', 'Caddo 911', scrape_caddo_incidents),
         ('batonrouge', 'Baton Rouge Traffic', scrape_batonrouge_incidents),
-        ('lafayette', 'Lafayette 911 (beta)', scrape_lafayette_incidents),
+        ('lafayette', 'Lafayette 911', scrape_lafayette_incidents),
         ('neworleans', 'New Orleans daily calls for service', scrape_neworleans_incidents),
     ]
     for source_name, label, scraper in source_jobs:
@@ -3321,20 +3458,32 @@ def _serialize_map_report_incident(incident: dict) -> dict:
 def index():
     return send_from_directory('public', 'index.html')
 
-@app.route('/about')
 @app.route('/about/')
 def about():
     return send_from_directory('public', 'about.html')
 
-@app.route('/reports')
+@app.route('/about')
+def about_redirect():
+    return redirect('/about/', code=301)
+
+
 @app.route('/reports/')
 def reports():
     return send_from_directory('public', 'reports.html')
 
-@app.route('/reports/monthly')
+@app.route('/reports')
+def reports_redirect():
+    return redirect('/reports/', code=301)
+
+
 @app.route('/reports/monthly/')
 def monthly_reports():
     return send_from_directory('public', 'monthly-reports.html')
+
+
+@app.route('/reports/monthly')
+def monthly_reports_redirect():
+    return redirect('/reports/monthly/', code=301)
 
 @app.route('/healthz')
 def healthz():

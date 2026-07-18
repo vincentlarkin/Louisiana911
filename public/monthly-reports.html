@@ -1,17 +1,49 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-US">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <base href="/">
   <title>Louisiana 911 Monthly Incident Reports | Louisiana911</title>
-  <meta name="description" content="Compare monthly public emergency incident trends and hotspots across Louisiana source areas.">
-  <meta name="robots" content="index,follow">
+  <meta name="description" content="Compare Louisiana 911 monthly public incident totals, top call types, and mapped hotspots across Caddo, Baton Rouge, Lafayette, and New Orleans.">
+  <meta name="robots" content="index,follow,max-image-preview:large">
   <link rel="canonical" href="https://louisiana911.com/reports/monthly/">
+  <meta name="theme-color" content="#0a0a0f">
+  <meta name="color-scheme" content="dark">
+  <meta name="application-name" content="Louisiana911">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/images/louisiana911-icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="/images/louisiana911-icon-192.png">
-  <link rel="manifest" href="/manifest.webmanifest?v=4.0.3">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.1.0">
+  <meta property="og:title" content="Louisiana 911 Monthly Incident Reports">
+  <meta property="og:description" content="Compare public incident totals, top call types, and mapped hotspots by month and Louisiana source area.">
+  <meta property="og:image" content="https://louisiana911.com/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1733">
+  <meta property="og:image:height" content="908">
+  <meta property="og:image:alt" content="Louisiana 911 public emergency incident monitor">
+  <meta property="og:url" content="https://louisiana911.com/reports/monthly/">
+  <meta property="og:site_name" content="Louisiana911">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Louisiana 911 Monthly Incident Reports">
+  <meta name="twitter:description" content="Monthly Louisiana public incident trends and mapped hotspots.">
+  <meta name="twitter:image" content="https://louisiana911.com/og.png">
+  <meta name="twitter:image:alt" content="Louisiana 911 public emergency incident monitor">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    "name": "Louisiana 911 Monthly Incident Reports",
+    "url": "https://louisiana911.com/reports/monthly/",
+    "description": "Monthly public incident totals, top call types, and mapped hotspots from Louisiana911.",
+    "inLanguage": "en-US",
+    "isPartOf": { "@id": "https://louisiana911.com/#website" }
+  }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -36,6 +68,8 @@
     body {
       margin: 0;
       min-height: 100vh;
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
       font-family: 'JetBrains Mono', monospace;
       color: var(--text);
       color-scheme: dark;
@@ -52,7 +86,7 @@
     .page-shell {
       width: min(1180px, calc(100vw - 32px));
       margin: 0 auto;
-      padding: 28px 0 48px;
+      padding: max(28px, env(safe-area-inset-top)) 0 calc(48px + env(safe-area-inset-bottom));
     }
 
     .hero {
@@ -540,7 +574,7 @@
     @media (max-width: 640px) {
       .page-shell {
         width: min(100vw - 20px, 1180px);
-        padding-top: 18px;
+        padding-top: max(18px, env(safe-area-inset-top));
       }
 
       .hero,
@@ -572,7 +606,7 @@
         <p>Review the top incident type for any available month, see the strongest 3-mile hotspot, and compare the top 10 incident categories.</p>
       </div>
       <div class="hero-actions">
-        <a class="hero-link" href="/reports">Reports</a>
+        <a class="hero-link" href="/reports/">Reports</a>
         <a class="hero-link" href="/">Back to Incident Map</a>
         <a class="hero-link primary" href="https://github.com/vincentlarkin/Caddo911-Monitor" target="_blank" rel="noopener noreferrer">Project GitHub</a>
       </div>
