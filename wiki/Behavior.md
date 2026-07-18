@@ -14,7 +14,7 @@ Instead, each incident is rendered as a **small semi-transparent triangle** (Lea
 
 Triangle size is based on the incident’s stored geocoding metadata:
 
-- **Smaller triangles**: clean intersection geocodes (ex: `geocode_quality = intersection-2`)
+- **Smaller triangles**: validated intersection geocodes (ex: `geocode_quality = intersection-2`)
 - **Larger triangles**: lower-confidence geocodes (ex: `fallback`, `city-only`, `cross-only`, `street-only`)
 
 This makes uncertain placements visually less precise while keeping high-confidence placements tight.
@@ -43,22 +43,25 @@ Examples of intent:
 
 ## Geocoding is intersection-first and self-healing (no DB wipe required)
 
-Incidents are geocoded using an intersection-first strategy:
+Incidents are geocoded using a validated street-segment strategy:
 
-- If two cross streets exist, try: `cross1 & cross2, City, State`
-- Else try: `street & cross, City, State`
-- Else fall back to `street, City, State` (and other safe fallbacks)
+- With a named street and two cross streets, validate `street & cross1` and `street & cross2`, then map the midpoint of that bracketed segment.
+- With one cross street, validate the named street and cross street as a real intersection.
+- If the street field is empty or is not a road, validate `cross1 & cross2` as the real intersection.
+- ArcGIS results are accepted as intersections only when the provider reports `StreetInt`, returns both requested road names, meets the confidence threshold, and falls inside the source boundary.
+- If specific cross-street evidence cannot be validated, the incident stays in the list without a map marker; the app does not invent a city-center coordinate.
 
 The app stores geocoding metadata on each incident:
 
-- `geocode_source`: `arcgis` | `osm` | `fallback`
-- `geocode_quality`: `intersection-2` | `street+cross` | `street-only` | `cross-only` | `city-only` | `fallback`
-- `geocode_query`: the actual provider query used
+- `geocode_source`: `arcgis` | `osm` | `unresolved`
+- `geocode_quality`: `street-segment` | `intersection-2` | `street+cross` | `street-only` | `cross-only` | `unresolved`
+- `geocode_query`: the provider query used (two queries separated by `||` for a validated segment)
 - `geocoded_at`: when the geocode was produced (UTC)
+- `geocode_version`: the validation algorithm version that produced the stored result
 
 ### Existing DB rows can improve over time
 
-When an incident already exists, the app can **re-geocode** it if the previous result was low-quality (ex: fallback/city-only/cross-only) and the improved result is meaningfully different.
+When an incident already exists, the app can **re-geocode** it when its result is low-quality or was created by an older geocoder version. This also replaces old coordinates that were incorrectly labeled as intersections.
 
 This lets you keep your existing `caddo911.db` while improving “bad” points as new scrapes arrive.
 

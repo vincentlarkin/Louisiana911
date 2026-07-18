@@ -13,6 +13,7 @@ import sys
 import math
 import re
 import json
+from difflib import SequenceMatcher
 from datetime import datetime, timezone, timedelta
 from threading import Lock, Thread
 from flask import Flask, jsonify, request, send_from_directory
@@ -229,11 +230,16 @@ def _init_archive_db(path: str) -> None:
             geocode_source TEXT,
             geocode_quality TEXT,
             geocode_query TEXT,
-            geocoded_at DATETIME
+            geocoded_at DATETIME,
+            geocode_version INTEGER
         )
     ''')
     try:
         cursor.execute("ALTER TABLE incidents ADD COLUMN source TEXT DEFAULT 'caddo'")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE incidents ADD COLUMN geocode_version INTEGER")
     except sqlite3.OperationalError:
         pass
     cursor.execute("UPDATE incidents SET source = 'caddo' WHERE source IS NULL OR TRIM(source) = ''")
@@ -316,10 +322,11 @@ def init_db():
     # Note: SQLite doesn't support ADD COLUMN IF NOT EXISTS in older versions, so we try/except.
     for col_name, col_type in (
         ("source", "TEXT DEFAULT 'caddo'"),
-        ("geocode_source", "TEXT"),     # 'arcgis' | 'osm' | 'fallback'
-        ("geocode_quality", "TEXT"),    # 'intersection-2' | 'street+cross' | 'street-only' | 'cross-only' | 'fallback'
+        ("geocode_source", "TEXT"),     # 'arcgis' | 'osm' | 'unresolved'
+        ("geocode_quality", "TEXT"),    # 'street-segment' | 'intersection-2' | 'street+cross' | lower-confidence values
         ("geocode_query", "TEXT"),      # the query string we sent to the provider
         ("geocoded_at", "DATETIME"),    # UTC ISO timestamp
+        ("geocode_version", "INTEGER"), # identifies results made by the current validation/ranking logic
     ):
         try:
             cursor.execute(f"ALTER TABLE incidents ADD COLUMN {col_name} {col_type}")
@@ -424,8 +431,8 @@ def archive_old_incidents(*, dry_run: bool = False) -> dict:
                         INSERT OR IGNORE INTO incidents 
                         (hash, agency, time, units, description, street, cross_streets, municipality, source,
                          latitude, longitude, first_seen, last_seen, is_active,
-                         geocode_source, geocode_quality, geocode_query, geocoded_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         geocode_source, geocode_quality, geocode_query, geocoded_at, geocode_version)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         inc.get('hash'),
                         inc.get('agency'),
@@ -445,6 +452,7 @@ def archive_old_incidents(*, dry_run: bool = False) -> dict:
                         inc.get('geocode_quality'),
                         inc.get('geocode_query'),
                         inc.get('geocoded_at'),
+                        inc.get('geocode_version'),
                     ))
                     hashes_to_delete.append(inc.get('hash'))
                     archived_count += 1
@@ -708,6 +716,33 @@ from geopy.geocoders import ArcGIS
 geolocator_arcgis = ArcGIS(timeout=5)
 geolocator_osm = Nominatim(user_agent=SCRAPER_USER_AGENT, timeout=5)
 geocode_cache = {}
+geocode_intersection_cache = {}
+
+# Increment whenever stored coordinates need to be reconsidered because the
+# validation/ranking algorithm changed. Version 2 understands that the Caddo
+# feed's two cross streets usually bracket a segment of the named street.
+GEOCODER_VERSION = 2
+ARCGIS_INTERSECTION_MIN_SCORE = 90.0
+ARCGIS_STREET_MIN_SCORE = 85.0
+MAX_STREET_SEGMENT_METERS = 8000.0
+
+ROAD_TYPE_TOKENS = {
+    "ALY", "ALLEY", "AV", "AVE", "AVENUE", "BLVD", "BOULEVARD",
+    "CIR", "CIRCLE", "CT", "COURT", "DR", "DRIVE", "EXPY", "EXPRESSWAY",
+    "FWY", "FREEWAY", "HWY", "HIGHWAY", "LN", "LANE", "LOOP", "PASSWAY",
+    "PKWY", "PARKWAY", "PL", "PLACE", "RD", "ROAD", "ST", "STREET",
+    "TER", "TERRACE", "TRL", "TRAIL", "WAY",
+}
+DIRECTION_ALIASES = {
+    "N": "N", "NORTH": "N",
+    "S": "S", "SOUTH": "S",
+    "E": "E", "EAST": "E",
+    "W": "W", "WEST": "W",
+    "NE": "NE", "NORTHEAST": "NE",
+    "NW": "NW", "NORTHWEST": "NW",
+    "SE": "SE", "SOUTHEAST": "SE",
+    "SW": "SW", "SOUTHWEST": "SW",
+}
 
 # 2020 Census parish outline for Caddo. Using the real shape keeps west Bossier
 # hits from slipping through the old coarse longitude cutoff.
@@ -1020,13 +1055,289 @@ def _locality_variants_for_geocoder(municipality: str | None, source: str | None
 
     return variants
 
+
+def _road_signature(value: str | None) -> tuple[tuple[str, ...], frozenset[str]]:
+    """Return comparable road-name words and explicit direction markers."""
+    raw_tokens = re.findall(r"[A-Z0-9]+", _clean_ws(value or "").upper())
+    name_tokens: list[str] = []
+    directions: set[str] = set()
+
+    for idx, token in enumerate(raw_tokens):
+        # In names such as "St Vincent Ave", the leading ST means Saint, not
+        # Street. Keeping that distinction avoids reducing the road to a single
+        # overly-broad word.
+        if token == "ST" and idx == 0 and len(raw_tokens) > 1:
+            name_tokens.append("SAINT")
+            continue
+
+        direction = DIRECTION_ALIASES.get(token)
+        if direction and (idx == 0 or idx == len(raw_tokens) - 1):
+            directions.add(direction)
+            continue
+
+        if token in ROAD_TYPE_TOKENS:
+            continue
+
+        if token == "I" and idx + 1 < len(raw_tokens) and raw_tokens[idx + 1].isdigit():
+            token = "INTERSTATE"
+        name_tokens.append(token)
+
+    return tuple(name_tokens), frozenset(directions)
+
+
+def _road_name_matches(requested: str | None, returned: str | None) -> bool:
+    """Conservatively compare a requested road with a provider road name."""
+    requested_words, requested_dirs = _road_signature(requested)
+    returned_words, returned_dirs = _road_signature(returned)
+    if not requested_words or not returned_words:
+        return False
+
+    if requested_dirs and returned_dirs and requested_dirs.isdisjoint(returned_dirs):
+        return False
+
+    if requested_words == returned_words:
+        return True
+
+    requested_set = set(requested_words)
+    returned_set = set(returned_words)
+    overlap = len(requested_set & returned_set)
+    union = len(requested_set | returned_set)
+    if overlap >= 2 and union and overlap / union >= 0.8:
+        return True
+
+    requested_text = " ".join(requested_words)
+    returned_text = " ".join(returned_words)
+    return min(len(requested_text), len(returned_text)) >= 6 and SequenceMatcher(
+        None, requested_text, returned_text
+    ).ratio() >= 0.9
+
+
+def _arcgis_attributes(location) -> dict:
+    raw = getattr(location, "raw", None) or {}
+    attrs = raw.get("attributes")
+    return attrs if isinstance(attrs, dict) else {}
+
+
+def _arcgis_score(location) -> float:
+    raw = getattr(location, "raw", None) or {}
+    attrs = _arcgis_attributes(location)
+    value = attrs.get("Score", raw.get("score", 0))
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _arcgis_intersection_roads(location) -> list[str]:
+    attrs = _arcgis_attributes(location)
+    roads: list[str] = []
+    for suffix in ("1", "2"):
+        parts = [
+            attrs.get(f"StPreDir{suffix}"),
+            attrs.get(f"StPreType{suffix}"),
+            attrs.get(f"StName{suffix}"),
+            attrs.get(f"StType{suffix}"),
+            attrs.get(f"StDir{suffix}"),
+        ]
+        road = _clean_ws(" ".join(str(part) for part in parts if part))
+        if road:
+            roads.append(road)
+
+    if len(roads) >= 2:
+        return roads[:2]
+
+    match_address = _clean_ws(
+        attrs.get("Match_addr")
+        or getattr(location, "address", "")
+        or (getattr(location, "raw", None) or {}).get("address", "")
+    )
+    street_part = match_address.split(",", 1)[0]
+    split_roads = [
+        _clean_ws(part)
+        for part in re.split(r"\s+(?:&|AND|AT)\s+", street_part, flags=re.IGNORECASE)
+        if _clean_ws(part)
+    ]
+    return split_roads[:2]
+
+
+def _arcgis_single_road(location) -> str:
+    attrs = _arcgis_attributes(location)
+    road = _clean_ws(" ".join(str(part) for part in (
+        attrs.get("StPreDir"),
+        attrs.get("StPreType"),
+        attrs.get("StName"),
+        attrs.get("StType"),
+        attrs.get("StDir"),
+    ) if part))
+    if road:
+        return road
+
+    match_address = _clean_ws(
+        attrs.get("Match_addr")
+        or getattr(location, "address", "")
+        or (getattr(location, "raw", None) or {}).get("address", "")
+    )
+    return match_address.split(",", 1)[0]
+
+
+def _arcgis_matches_intersection(location, road_a: str, road_b: str) -> bool:
+    attrs = _arcgis_attributes(location)
+    address_type = _clean_ws(attrs.get("Addr_type") or "").lower()
+    if address_type not in {"streetint", "intersection"}:
+        return False
+    if _arcgis_score(location) < ARCGIS_INTERSECTION_MIN_SCORE:
+        return False
+
+    returned_roads = _arcgis_intersection_roads(location)
+    if len(returned_roads) < 2:
+        return False
+    first, second = returned_roads[:2]
+    return (
+        _road_name_matches(road_a, first) and _road_name_matches(road_b, second)
+    ) or (
+        _road_name_matches(road_a, second) and _road_name_matches(road_b, first)
+    )
+
+
+def _arcgis_matches_single_road(location, requested_road: str) -> bool:
+    attrs = _arcgis_attributes(location)
+    address_type = _clean_ws(attrs.get("Addr_type") or "").lower()
+    if address_type and address_type not in {
+        "streetname", "streetaddress", "pointaddress", "subaddress",
+    }:
+        return False
+    if _arcgis_score(location) < ARCGIS_STREET_MIN_SCORE:
+        return False
+    return _road_name_matches(requested_road, _arcgis_single_road(location))
+
+
+def _as_location_list(value) -> list:
+    if not value:
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return [value]
+
+
+def _find_arcgis_intersection(
+    road_a: str,
+    road_b: str,
+    locality_variants: list[tuple[str, ...]],
+    source_name: str,
+    attempt_state: dict | None = None,
+) -> dict | None:
+    cache_locality = locality_variants[0] if locality_variants else ()
+    road_key = tuple(sorted((_normalize_location_token(road_a), _normalize_location_token(road_b))))
+    cache_key = (source_name, road_key, cache_locality)
+    cached = geocode_intersection_cache.get(cache_key)
+    if cached:
+        return dict(cached)
+
+    for locality_parts in locality_variants:
+        query = ", ".join((f"{road_a} & {road_b}", *locality_parts))
+        try:
+            locations = _as_location_list(geolocator_arcgis.geocode(
+                query,
+                exactly_one=False,
+                timeout=3,
+                out_fields="*",
+            ))
+            if attempt_state is not None:
+                attempt_state["provider_responded"] = True
+        except Exception:
+            continue
+
+        matches = []
+        for location in locations[:10]:
+            try:
+                if not _is_in_source_bounds(float(location.latitude), float(location.longitude), source_name):
+                    continue
+                if not _arcgis_matches_intersection(location, road_a, road_b):
+                    continue
+                matches.append(location)
+            except (TypeError, ValueError, AttributeError):
+                continue
+
+        if matches:
+            location = max(matches, key=_arcgis_score)
+            result = {
+                "lat": float(location.latitude),
+                "lng": float(location.longitude),
+                "source": "arcgis",
+                "query": query,
+                "score": _arcgis_score(location),
+            }
+            geocode_intersection_cache[cache_key] = dict(result)
+            return result
+    return None
+
+
+def _find_arcgis_street(
+    road: str,
+    quality: str,
+    locality_variants: list[tuple[str, ...]],
+    source_name: str,
+    attempt_state: dict | None = None,
+) -> dict | None:
+    for locality_parts in locality_variants:
+        query = ", ".join((road, *locality_parts))
+        try:
+            locations = _as_location_list(geolocator_arcgis.geocode(
+                query,
+                exactly_one=False,
+                timeout=3,
+                out_fields="*",
+            ))
+            if attempt_state is not None:
+                attempt_state["provider_responded"] = True
+        except Exception:
+            continue
+
+        matches = []
+        for location in locations[:10]:
+            try:
+                if not _is_in_source_bounds(float(location.latitude), float(location.longitude), source_name):
+                    continue
+                if not _arcgis_matches_single_road(location, road):
+                    continue
+                matches.append(location)
+            except (TypeError, ValueError, AttributeError):
+                continue
+
+        if matches:
+            location = max(matches, key=_arcgis_score)
+            return {
+                "lat": float(location.latitude),
+                "lng": float(location.longitude),
+                "source": "arcgis",
+                "quality": quality,
+                "query": query,
+            }
+    return None
+
+
+def _osm_matches_road(location, requested_road: str) -> bool:
+    raw = getattr(location, "raw", None) or {}
+    address = raw.get("address") if isinstance(raw.get("address"), dict) else {}
+    returned_road = _clean_ws(
+        address.get("road")
+        or address.get("pedestrian")
+        or address.get("residential")
+        or (getattr(location, "address", "") or "").split(",", 1)[0]
+    )
+    return _road_name_matches(requested_road, returned_road)
+
 def geocode_address(street, cross_streets, municipality, source: str = 'caddo'):
     """
     Convert address to lat/lng coordinates.
-    Fast, best-effort geocoding with source-aware bounds.
-    """
-    import random
+    Validate exact intersections and understand two-cross-street segments.
 
+    In the Caddo feed, a value such as:
+      E BERT KOUNS INDUSTRIAL @ JUMP RUN & YOUREE DR
+    means a location on E Bert Kouns bracketed by those two roads. It does not
+    mean that Jump Run intersects Youree. When both named-street intersections
+    validate, use their midpoint as the best estimate of the segment.
+    """
     source_name = _normalize_source_name(source)
     geo_profile = _source_geo_profile(source_name)
 
@@ -1053,122 +1364,140 @@ def geocode_address(street, cross_streets, municipality, source: str = 'caddo'):
     if cache_key in geocode_cache:
         return geocode_cache[cache_key]
 
-    # Build queries in priority order - best first
-    queries: list[tuple[str, str]] = []
-    seen_queries: set[str] = set()
+    attempt_state = {"provider_responded": False}
 
-    def add_query(location_part: str | None, quality: str) -> None:
-        location_part = _clean_ws(location_part or "")
-        if not location_part:
-            return
-        for locality_parts in locality_variants:
-            query = ", ".join((location_part, *locality_parts))
-            query_key = query.lower()
-            if query_key in seen_queries:
-                continue
-            seen_queries.add(query_key)
-            queries.append((query, quality))
-
-    # Best: intersection of two cross streets
-    if cross1 and cross2:
-        add_query(f"{cross1} & {cross2}", "intersection-2")
-    # Good: street + cross street
-    if street_clean and cross1:
-        add_query(f"{street_clean} & {cross1}", "street+cross")
-    if street_clean and cross2:
-        add_query(f"{street_clean} & {cross2}", "street+cross")
-    # OK: just the street
+    # First validate the named street against each bracketing cross street.
+    # ArcGIS's Addr_type=StreetInt plus returned road components are required;
+    # a high-score StreetName result is still only a fuzzy partial match.
+    street_intersections: list[dict] = []
     if street_clean:
-        add_query(street_clean, "street-only")
-    # Fallback: just a cross street
-    if cross1:
-        add_query(cross1, "cross-only")
-    
-    # Quality levels - only return early on GOOD matches
-    good_qualities = {'intersection-2', 'street+cross'}
-    
-    # Collect all valid results, return early only on high-quality matches
-    valid_results: list[dict] = []
-    
-    # Try ArcGIS
-    for query, quality in queries:
-        try:
-            location = geolocator_arcgis.geocode(query, timeout=3)
-            if location and _is_in_source_bounds(location.latitude, location.longitude, source_name):
+        for cross in (cross1, cross2):
+            if not cross:
+                continue
+            match = _find_arcgis_intersection(
+                street_clean,
+                cross,
+                locality_variants,
+                source_name,
+                attempt_state,
+            )
+            if match:
+                street_intersections.append(match)
+
+    if len(street_intersections) >= 2:
+        first, second = street_intersections[:2]
+        segment_length = _haversine_m(
+            first['lat'], first['lng'], second['lat'], second['lng']
+        )
+        if segment_length <= MAX_STREET_SEGMENT_METERS:
+            result = {
+                'lat': (first['lat'] + second['lat']) / 2.0,
+                'lng': (first['lng'] + second['lng']) / 2.0,
+                'source': 'arcgis',
+                'quality': 'street-segment',
+                'query': f"{first['query']} || {second['query']}",
+            }
+            geocode_cache[cache_key] = result
+            log(
+                f"  [ARC] street-segment ({segment_length:.0f}m) | "
+                f"{street_clean} @ {cross1} & {cross2} -> "
+                f"({result['lat']:.5f}, {result['lng']:.5f})"
+            )
+            return result
+
+    # One verified named-street intersection is safer than a fuzzy match of the
+    # two cross streets to each other.
+    if street_intersections:
+        result = dict(street_intersections[0])
+        result['quality'] = 'street+cross'
+        result.pop('score', None)
+        geocode_cache[cache_key] = result
+        log(f"  [ARC] street+cross | {result['query']} -> ({result['lat']:.5f}, {result['lng']:.5f})")
+        return result
+
+    # If the street field is empty or is a place/subdivision label, the two
+    # cross streets may themselves be the real intersection.
+    if cross1 and cross2:
+        match = _find_arcgis_intersection(
+            cross1,
+            cross2,
+            locality_variants,
+            source_name,
+            attempt_state,
+        )
+        if match:
+            result = dict(match)
+            result['quality'] = 'intersection-2'
+            result.pop('score', None)
+            geocode_cache[cache_key] = result
+            log(f"  [ARC] intersection-2 | {result['query']} -> ({result['lat']:.5f}, {result['lng']:.5f})")
+            return result
+
+    # Only use a lower-confidence road centroid when the feed supplied no
+    # intersection context at all. If cross streets were supplied but could
+    # not be validated, leaving the point unresolved is safer than discarding
+    # the most specific location evidence.
+    fallback_roads: list[tuple[str, str]] = []
+    if street_clean and not cross1:
+        fallback_roads.append((street_clean, 'street-only'))
+    elif cross1 and not street_clean and not cross2:
+        fallback_roads.append((cross1, 'cross-only'))
+
+    for road, quality in fallback_roads:
+        result = _find_arcgis_street(
+            road, quality, locality_variants, source_name, attempt_state
+        )
+        if result:
+            geocode_cache[cache_key] = result
+            log(f"  [ARC] {quality} | {result['query']} -> ({result['lat']:.5f}, {result['lng']:.5f})")
+            return result
+
+    for road, quality in fallback_roads:
+        for locality_parts in locality_variants:
+            query = ", ".join((road, *locality_parts))
+            try:
+                location = geolocator_osm.geocode(
+                    query,
+                    country_codes='us',
+                    exactly_one=True,
+                    addressdetails=True,
+                    timeout=3,
+                )
+                attempt_state["provider_responded"] = True
+                if not location:
+                    continue
+                if not _is_in_source_bounds(location.latitude, location.longitude, source_name):
+                    continue
+                if not _osm_matches_road(location, road):
+                    continue
                 result = {
-                    'lat': location.latitude,
-                    'lng': location.longitude,
-                    'source': 'arcgis',
-                    'quality': quality,
-                    'query': query,
-                }
-                # Only return early if it's a HIGH-QUALITY match
-                if quality in good_qualities:
-                    geocode_cache[cache_key] = result
-                    log(f"  [ARC] {quality} | {query} -> ({result['lat']:.5f}, {result['lng']:.5f})")
-                    return result
-                # Otherwise save it and keep trying for something better
-                valid_results.append(result)
-        except Exception:
-            pass
-    
-    # Try OSM if we don't have a good result yet
-    for query, quality in queries[:8]:
-        try:
-            location = geolocator_osm.geocode(query, country_codes='us', exactly_one=True, timeout=3)
-            if location and _is_in_source_bounds(location.latitude, location.longitude, source_name):
-                result = {
-                    'lat': location.latitude,
-                    'lng': location.longitude,
+                    'lat': float(location.latitude),
+                    'lng': float(location.longitude),
                     'source': 'osm',
                     'quality': quality,
                     'query': query,
                 }
-                if quality in good_qualities:
-                    geocode_cache[cache_key] = result
-                    log(f"  [OSM] {quality} | {query} -> ({result['lat']:.5f}, {result['lng']:.5f})")
-                    return result
-                valid_results.append(result)
-        except Exception:
-            pass
-    
-    # Pick best from what we collected
-    if valid_results:
-        # Sort by quality: intersection-2 > street+cross > street-only > cross-only
-        quality_rank = {'intersection-2': 4, 'street+cross': 3, 'street-only': 2, 'cross-only': 1}
-        county = (geo_profile.get("county") or "").lower()
-        valid_results.sort(
-            key=lambda r: (
-                quality_rank.get(r['quality'], 0),
-                1 if county and county in (r.get('query') or '').lower() else 0,
-                -_haversine_m(
-                    float(r['lat']),
-                    float(r['lng']),
-                    float(geo_profile['center_lat']),
-                    float(geo_profile['center_lon']),
-                ),
-            ),
-            reverse=True,
-        )
-        result = valid_results[0]
-        geocode_cache[cache_key] = result
-        log(f"  [{result['source'].upper()[:3]}] {result['quality']} | {result['query']} -> ({result['lat']:.5f}, {result['lng']:.5f})")
-        return result
-    
-    # Nothing worked - fallback
-    log(f"  [--] fallback | {street_clean or '?'} @ {cross1 or '?'} {'& ' + cross2 if cross2 else ''}")
-    
-    # Fallback to source region center with slight jitter.
-    offset = lambda: (random.random() - 0.5) * 0.04
-    default = {
-        'lat': geo_profile['center_lat'] + offset(),
-        'lng': geo_profile['center_lon'] + offset(),
-        'source': 'fallback',
-        'quality': 'fallback',
+                geocode_cache[cache_key] = result
+                log(f"  [OSM] {quality} | {query} -> ({result['lat']:.5f}, {result['lng']:.5f})")
+                return result
+            except Exception:
+                continue
+
+    # Never fabricate a point near the city center. An unresolved incident can
+    # remain visible in the list without putting a confidently wrong marker on
+    # the map.
+    unresolved = {
+        'lat': None,
+        'lng': None,
+        'source': 'unresolved',
+        'quality': 'unresolved',
         'query': None,
+        'provider_responded': attempt_state['provider_responded'],
     }
-    geocode_cache[cache_key] = default
-    return default
+    if attempt_state['provider_responded']:
+        geocode_cache[cache_key] = unresolved
+    log(f"  [--] unresolved | {street_clean or '?'} @ {cross1 or '?'} {'& ' + cross2 if cross2 else ''}")
+    return unresolved
 
 def hash_incident(incident):
     """Generate unique hash for incident deduplication"""
@@ -1245,15 +1574,23 @@ def process_incidents(incidents, *, source: str = 'caddo'):
         # Check if exists
         try:
             cursor.execute(
-                'SELECT id, latitude, longitude, geocode_source, geocode_quality FROM incidents WHERE hash = ?',
+                'SELECT id, latitude, longitude, geocode_source, geocode_quality, geocode_version FROM incidents WHERE hash = ?',
                 (h,)
             )
             existing = cursor.fetchone()
-            existing_cols = "new"
+            existing_cols = "versioned"
         except sqlite3.OperationalError:
-            cursor.execute('SELECT id, latitude, longitude FROM incidents WHERE hash = ?', (h,))
-            existing = cursor.fetchone()
-            existing_cols = "old"
+            try:
+                cursor.execute(
+                    'SELECT id, latitude, longitude, geocode_source, geocode_quality FROM incidents WHERE hash = ?',
+                    (h,)
+                )
+                existing = cursor.fetchone()
+                existing_cols = "new"
+            except sqlite3.OperationalError:
+                cursor.execute('SELECT id, latitude, longitude FROM incidents WHERE hash = ?', (h,))
+                existing = cursor.fetchone()
+                existing_cols = "old"
         
         if existing:
             # Update last_seen
@@ -1268,23 +1605,27 @@ def process_incidents(incidents, *, source: str = 'caddo'):
             try:
                 existing_lat = existing[1]
                 existing_lng = existing[2]
-                existing_source = existing[3] if existing_cols == "new" and len(existing) > 3 else None
-                existing_quality = existing[4] if existing_cols == "new" and len(existing) > 4 else None
+                existing_source = existing[3] if existing_cols in ("new", "versioned") and len(existing) > 3 else None
+                existing_quality = existing[4] if existing_cols in ("new", "versioned") and len(existing) > 4 else None
+                existing_version = existing[5] if existing_cols == "versioned" and len(existing) > 5 else None
 
                 needs_geo = (existing_lat is None or existing_lng is None)
-                low_quality = (existing_source in (None, "fallback", "skipped")) or (existing_quality in (None, "fallback", "city-only", "cross-only", "unknown-location"))
-                if (needs_geo or low_quality) and (incident.get('street') or incident.get('cross_streets')):
+                low_quality = (existing_source in (None, "fallback", "skipped", "unresolved")) or (existing_quality in (None, "fallback", "city-only", "cross-only", "unknown-location", "unresolved"))
+                stale_version = existing_version != GEOCODER_VERSION
+                if (needs_geo or low_quality or stale_version) and (incident.get('street') or incident.get('cross_streets')):
                     geo = geocode_address(
                         incident.get('street'),
                         incident.get('cross_streets'),
                         incident.get('municipality'),
                         source=incident_source,
                     )
-                    if geo and geo.get('lat') is not None and geo.get('lng') is not None:
-                        should_update = False
-                        if needs_geo:
-                            should_update = True
-                        else:
+                    if geo:
+                        new_has_coords = geo.get('lat') is not None and geo.get('lng') is not None
+                        provider_confirmed = new_has_coords or bool(geo.get('provider_responded'))
+                        should_update = provider_confirmed and (
+                            stale_version or (needs_geo and new_has_coords)
+                        )
+                        if not needs_geo and new_has_coords:
                             try:
                                 dist_m = _haversine_m(float(existing_lat), float(existing_lng), float(geo['lat']), float(geo['lng']))
                                 # Only overwrite if materially different (avoid churning minor provider jitter)
@@ -1292,12 +1633,12 @@ def process_incidents(incidents, *, source: str = 'caddo'):
                                     should_update = True
                             except Exception:
                                 # If distance calc fails, be conservative and avoid overwriting
-                                should_update = False
+                                should_update = stale_version
 
                         if should_update:
                             try:
                                 cursor.execute(
-                                    'UPDATE incidents SET latitude = ?, longitude = ?, geocode_source = ?, geocode_quality = ?, geocode_query = ?, geocoded_at = ? WHERE hash = ?',
+                                    'UPDATE incidents SET latitude = ?, longitude = ?, geocode_source = ?, geocode_quality = ?, geocode_query = ?, geocoded_at = ?, geocode_version = ? WHERE hash = ?',
                                     (
                                         geo['lat'],
                                         geo['lng'],
@@ -1305,6 +1646,7 @@ def process_incidents(incidents, *, source: str = 'caddo'):
                                         geo.get('quality'),
                                         geo.get('query'),
                                         now,
+                                        GEOCODER_VERSION,
                                         h,
                                     )
                                 )
@@ -1330,8 +1672,8 @@ def process_incidents(incidents, *, source: str = 'caddo'):
                     INSERT OR IGNORE INTO incidents 
                     (hash, agency, time, units, description, street, cross_streets, municipality, source,
                      latitude, longitude, first_seen, last_seen,
-                     geocode_source, geocode_quality, geocode_query, geocoded_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     geocode_source, geocode_quality, geocode_query, geocoded_at, geocode_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     h,
                     incident['agency'],
@@ -1350,6 +1692,7 @@ def process_incidents(incidents, *, source: str = 'caddo'):
                     geo.get('quality'),
                     geo.get('query'),
                     now,
+                    GEOCODER_VERSION,
                 ))
             except sqlite3.OperationalError:
                 # Older schema: try insert without geocode metadata columns.
@@ -3352,6 +3695,7 @@ def run_regeocode(*, dry_run: bool = False, limit: int | None = None) -> None:
     
     # Clear the geocode cache to force fresh lookups
     geocode_cache.clear()
+    geocode_intersection_cache.clear()
     
     for i, row in enumerate(rows, 1):
         # Convert Row to dict for easier access (handles missing columns gracefully)
@@ -3364,6 +3708,7 @@ def run_regeocode(*, dry_run: bool = False, limit: int | None = None) -> None:
         old_lng = row_dict.get('longitude')
         old_source = row_dict.get('geocode_source')
         old_quality = row_dict.get('geocode_quality')
+        old_version = row_dict.get('geocode_version')
         desc = row_dict.get('description') or 'Unknown'
         
         # Skip if no address info at all
@@ -3384,13 +3729,21 @@ def run_regeocode(*, dry_run: bool = False, limit: int | None = None) -> None:
             new_source = geo.get('source')
             new_quality = geo.get('quality')
             
-            # Check if coordinates changed significantly (>50m)
-            changed = False
-            if old_lat is None or old_lng is None:
-                changed = True
-            elif new_lat is not None and new_lng is not None:
+            # Check coordinate presence/distance plus metadata algorithm version.
+            old_has_coords = old_lat is not None and old_lng is not None
+            new_has_coords = new_lat is not None and new_lng is not None
+            provider_confirmed = new_has_coords or bool(geo.get('provider_responded'))
+            coordinates_changed = provider_confirmed and old_has_coords != new_has_coords
+            if old_has_coords and new_has_coords:
                 dist = _haversine_m(float(old_lat), float(old_lng), float(new_lat), float(new_lng))
-                changed = dist > 50
+                coordinates_changed = dist > 50
+            changed = provider_confirmed and (
+                coordinates_changed or any((
+                    old_source != new_source,
+                    old_quality != new_quality,
+                    old_version != GEOCODER_VERSION,
+                ))
+            )
             
             # Log progress
             status = "CHANGED" if changed else "same"
@@ -3400,9 +3753,9 @@ def run_regeocode(*, dry_run: bool = False, limit: int | None = None) -> None:
                     cursor.execute('''
                         UPDATE incidents 
                         SET latitude = ?, longitude = ?, geocode_source = ?, geocode_quality = ?, 
-                            geocode_query = ?, geocoded_at = ?
+                            geocode_query = ?, geocoded_at = ?, geocode_version = ?
                         WHERE id = ?
-                    ''', (new_lat, new_lng, new_source, new_quality, geo.get('query'), now, incident_id))
+                    ''', (new_lat, new_lng, new_source, new_quality, geo.get('query'), now, GEOCODER_VERSION, incident_id))
                     updated += 1
                 except sqlite3.OperationalError:
                     # Older schema
