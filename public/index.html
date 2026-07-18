@@ -7,7 +7,7 @@
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/images/caddo911-icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="/images/caddo911-icon-192.png">
-  <link rel="manifest" href="/manifest.webmanifest?v=3.2.94LAbeta">
+  <link rel="manifest" href="/manifest.webmanifest?v=3.2.95LAbeta">
   <meta name="theme-color" content="#0a0a0f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -19,9 +19,9 @@
   <meta name="twitter:image" content="images/caddo911logo.png">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3.2.93LAbeta" />
+  <link rel="stylesheet" href="styles.css?v=3.2.95LAbeta" />
 </head>
-<body>
+<body class="map-dark">
   <header class="header">
     <div class="logo">
       <picture class="logo-icon">
@@ -29,14 +29,13 @@
         <img src="images/caddo911logo.png" alt="Caddo 911" class="logo-icon-img">
       </picture>
       <div class="logo-text">
-        <h1>CADDO PARISH</h1>
-        <p>Emergency Dispatch Live Feed</p>
+        <h1>Caddo 911 Live</h1>
+        <p>Regional emergency incident monitor</p>
       </div>
     </div>
     <div class="status-bar">
       <div class="status-item status-live">
-        <span class="status-label">Status</span>
-        <span class="status-value live"><span class="live-dot"></span>LIVE</span>
+        <span class="status-value live"><span class="live-dot"></span>Live</span>
       </div>
       <div class="status-item status-update">
         <span class="status-label">Last Update</span>
@@ -53,22 +52,16 @@
           <button class="view-switch-btn" type="button" data-view-mode="list" aria-pressed="false">List</button>
         </div>
       </div>
-      <div class="status-item status-theme">
-        <span class="status-label">Map Theme</span>
-        <button class="map-theme-toggle" id="map-theme-toggle" aria-pressed="true" title="Toggle map theme">
-          <span class="map-theme-icon" aria-hidden="true">☀️</span>
-        </button>
-      </div>
       <div class="status-item status-location">
-        <span class="status-label">My Location</span>
         <button class="location-btn" id="location-btn" title="Show my location" aria-label="Show my location on the map">
           <span class="map-location-icon" aria-hidden="true">◎</span>
+          <span class="location-label">Locate</span>
         </button>
       </div>
-      <button class="settings-btn" id="settings-btn" onclick="toggleSettingsPanel()" title="Settings">
+      <button class="settings-btn" id="settings-btn" onclick="toggleSettingsPanel()" title="Settings" aria-label="Settings">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
         </button>
-      <button class="info-btn" onclick="toggleInfoPanel()" title="About">i</button>
+      <button class="info-btn" onclick="toggleInfoPanel()" title="About" aria-label="About">i</button>
     </div>
   </header>
   
@@ -148,7 +141,7 @@
           </a>
         </div>
         <p class="info-credit">Made by <a class="info-credit-link" href="mailto:vincent@vincentlarkin.com">Vincent Larkin</a></p>
-        <p class="info-version">v3.2.93LAbeta</p>
+        <p class="info-version">v3.2.95LAbeta</p>
       </div>
     </div>
   </div>
@@ -180,10 +173,11 @@
           <div class="legend-mini" aria-hidden="true">
             <div class="dot-stack">
               <span class="dot" style="background: var(--red);"></span>
+              <span class="dot dot-medical"></span>
               <span class="dot" style="background: var(--amber);"></span>
               <span class="dot" style="background: var(--blue);"></span>
               <span class="dot" style="background: var(--green);"></span>
-              <span class="dot" style="background: var(--gray);"></span>
+              <span class="dot dot-custody"></span>
             </div>
           </div>
           
@@ -193,6 +187,10 @@
             <div class="legend-item">
               <div class="legend-dot" style="background: var(--red)"></div>
               <span>High severity</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-dot legend-dot-medical"></div>
+              <span>Medical / EMS</span>
             </div>
             <div class="legend-item">
               <div class="legend-dot" style="background: var(--amber)"></div>
@@ -207,12 +205,10 @@
               <span>Public service</span>
             </div>
             <div class="legend-item">
-              <div class="legend-dot" style="background: var(--gray)"></div>
+              <div class="legend-dot legend-dot-custody"></div>
               <span>Custody / prisoner</span>
             </div>
-            <div style="margin-top: 10px; font-size: 10px; color: var(--text-dim); line-height: 1.4;">
-              Colors = severity. Use the sidebar filters to limit by agency.
-            </div>
+            <p class="legend-note">Colors indicate incident severity.</p>
           </div>
         </div>
       </div>
@@ -383,98 +379,27 @@
     map.getPane('parish').style.zIndex = 500;
     map.getPane('parish').style.pointerEvents = 'none';
 
-    // Tile layers for light + dark themes
-    const lightBase = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+    // The interface has a single dark basemap so the incident colors stay consistent.
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
       pane: 'base',
       attribution: '&copy; OpenStreetMap &copy; CARTO',
       subdomains: 'abcd',
-      maxZoom: 19,
-      crossOrigin: true
-    });
-    const lightLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19
+    }).addTo(map);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
       pane: 'labels',
       subdomains: 'abcd',
       maxZoom: 19,
-      opacity: 0.65,
-      crossOrigin: true
-    });
-    const osmFallbackTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      pane: 'base',
-      attribution: '&copy; OpenStreetMap contributors',
-      maxZoom: 19,
-      subdomains: 'abc',
-      crossOrigin: true
-    });
-    const tileLayers = {
-      dark: {
-        base: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
-          pane: 'base',
-          attribution: '&copy; OpenStreetMap &copy; CARTO',
-          subdomains: 'abcd',
-          maxZoom: 19
-        }),
-        labels: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
-          pane: 'labels',
-          subdomains: 'abcd',
-          maxZoom: 19,
-          opacity: 1
-        })
-      },
-      light: {
-        base: lightBase,
-        labels: lightLabels
-      }
-    };
-    
-    let mapTheme = 'light';
-    let parishOutlineLayer = null;
-    
-    function setMapTheme(theme) {
-      mapTheme = theme === 'dark' ? 'dark' : 'light';
-      // Remove any existing layers
-      Object.values(tileLayers.dark).forEach(layer => { if (map.hasLayer(layer)) map.removeLayer(layer); });
-      Object.values(tileLayers.light).forEach(layer => { if (map.hasLayer(layer)) map.removeLayer(layer); });
-      
-      const layersToAdd = tileLayers[mapTheme];
-      Object.values(layersToAdd).forEach(layer => layer.addTo(map));
-      
-      // If light tiles fail, fall back to standard OSM automatically
-      if (mapTheme === 'light' && layersToAdd.base === lightBase) {
-        const onError = () => {
-          if (map.hasLayer(lightBase)) {
-            map.removeLayer(lightBase);
-            osmFallbackTiles.addTo(map);
-            tileLayers.light.base = osmFallbackTiles;
-            // drop labels to avoid mismatch
-            if (map.hasLayer(lightLabels)) map.removeLayer(lightLabels);
-            delete tileLayers.light.labels;
-          }
-        };
-        lightBase.once('tileerror', onError);
-      }
-      
-      document.body.classList.toggle('map-light', mapTheme === 'light');
-      document.body.classList.toggle('map-dark', mapTheme === 'dark');
-      
-      const toggle = document.getElementById('map-theme-toggle');
-      if (toggle) {
-        const iconEl = toggle.querySelector('.map-theme-icon');
-        if (iconEl) iconEl.textContent = mapTheme === 'light' ? '☀️' : '🌙';
-        toggle.setAttribute('aria-pressed', String(mapTheme === 'light'));
-      }
+      opacity: 1
+    }).addTo(map);
 
-      if (parishOutlineLayer) {
-        parishOutlineLayer.setStyle(getParishOutlineStyle());
-      }
-    }
-    
-    // Default to dark mode
-    setMapTheme('dark');
+    let parishOutlineLayer = null;
 
     function getParishOutlineStyle() {
       return {
         pane: 'parish',
-        color: mapTheme === 'dark' ? 'rgba(232, 232, 240, 0.45)' : 'rgba(10, 10, 15, 0.6)',
+        color: 'rgba(232, 232, 240, 0.45)',
         weight: 2,
         opacity: 0.95,
         fill: false
@@ -543,13 +468,6 @@
     // Add zoom control to bottom right
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     
-    const mapThemeToggle = document.getElementById('map-theme-toggle');
-    if (mapThemeToggle) {
-      mapThemeToggle.addEventListener('click', () => {
-        setMapTheme(mapTheme === 'light' ? 'dark' : 'light');
-      });
-    }
-
     const locationBtn = document.getElementById('location-btn');
     let userLocationMarker = null;
     let userLocationAccuracyCircle = null;
@@ -1448,10 +1366,10 @@
       let popupHtml = `
         <div class="popup-content">
           <div class="popup-title">${escapeHtml(incident.description || 'Incident')}</div>
-          <div class="popup-detail">📍 ${escapeHtml(locationStr)}</div>
-          <div class="popup-detail">🕐 ${escapeHtml(formatTime(incident.time))}</div>
-          <div class="popup-detail">🚨 ${escapeHtml(agencyDisplay)} &bull; ${escapeHtml(unitLabel)}</div>
-          <div class="popup-detail">⚠️ Severity: ${escapeHtml(sev.toUpperCase())}</div>
+          <div class="popup-detail"><span class="popup-label">Location</span>${escapeHtml(locationStr)}</div>
+          <div class="popup-detail"><span class="popup-label">Time</span>${escapeHtml(formatTime(incident.time))}</div>
+          <div class="popup-detail"><span class="popup-label">Agency</span>${escapeHtml(agencyDisplay)} &bull; ${escapeHtml(unitLabel)}</div>
+          <div class="popup-detail"><span class="popup-label">Severity</span>${escapeHtml(sev.toUpperCase())}</div>
           <a class="popup-link" href="${gmaps}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>
       `;
 
@@ -1613,18 +1531,21 @@
       const agencyDisplay = formatAgencyDisplay(incident);
       const unitLabel = formatUnitCount(incident?.units);
       const hasLocation = hasValidLocation(incident);
-      const clickAttr = hasLocation ? ` onclick="focusIncident(${incident.latitude}, ${incident.longitude})"` : '';
+      const interactiveClass = hasLocation ? ' is-actionable' : '';
+      const interactionAttrs = hasLocation
+        ? ` role="button" tabindex="0" onclick="focusIncident(${incident.latitude}, ${incident.longitude})" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); focusIncident(${incident.latitude}, ${incident.longitude}); }"`
+        : '';
       const locationText = incidentLocationText(incident);
       
       return `
-        <div class="incident-card ${sevClass} ${isNew ? 'new' : ''}" 
-             data-id="${incident.id}"${clickAttr}>
+        <div class="incident-card ${sevClass} ${isNew ? 'new' : ''}${interactiveClass}"
+             data-id="${incident.id}"${interactionAttrs}>
           <div class="incident-header">
             <span class="incident-type">${incident.description}</span>
             <span class="incident-time">${formatTime(incident.time)}</span>
           </div>
           <div class="incident-location">
-            📍 ${locationText}
+            ${locationText}
           </div>
           <div class="incident-meta">
             <span class="incident-agency ${sevClass}" title="Severity: ${sev.toUpperCase()}">${agencyDisplay}</span>
@@ -1685,23 +1606,23 @@
       incidentModalBody.innerHTML = `
         <div class="incident-modal-severity sev-${sev}">${escapeHtml(sev.toUpperCase())}</div>
         <div class="incident-modal-detail">
-          <span class="incident-modal-label">📍 Location</span>
+          <span class="incident-modal-label">Location</span>
           <span class="incident-modal-value">${escapeHtml(locationStr)}</span>
         </div>
         <div class="incident-modal-detail">
-          <span class="incident-modal-label">🕐 Time</span>
+          <span class="incident-modal-label">Time</span>
           <span class="incident-modal-value">${escapeHtml(formatTime(incident?.time))}</span>
         </div>
         <div class="incident-modal-detail">
-          <span class="incident-modal-label">🚨 Agency</span>
+          <span class="incident-modal-label">Agency</span>
           <span class="incident-modal-value">${escapeHtml(agencyDisplay)}</span>
         </div>
         <div class="incident-modal-detail">
-          <span class="incident-modal-label">🚓 Units</span>
+          <span class="incident-modal-label">Units</span>
           <span class="incident-modal-value">${escapeHtml(unitLabel)}</span>
         </div>
         <div class="incident-modal-detail">
-          <span class="incident-modal-label">📌 Area</span>
+          <span class="incident-modal-label">Area</span>
           <span class="incident-modal-value">${escapeHtml(municipality)}</span>
         </div>
       `;
@@ -2076,9 +1997,9 @@
         
         listEl.innerHTML = `
           <div class="empty-state">
-            <div class="icon">📡</div>
+            <div class="empty-state-mark" aria-hidden="true"></div>
             <p>No ${label} incidents</p>
-            <p style="font-size: 11px; margin-top: 10px;">${hasAnyFilter ? 'Try a different filter combination' : 'Waiting for data...'}</p>
+            <p class="empty-state-detail">${hasAnyFilter ? 'Try a different filter combination' : 'Waiting for data...'}</p>
           </div>
         `;
       } else {
@@ -2428,10 +2349,10 @@
       if (total === 0) {
         listEl.innerHTML = `
           <div class="empty-state">
-            <div class="icon">📋</div>
+            <div class="empty-state-mark" aria-hidden="true"></div>
             <p>No incidents available for</p>
-            <p style="font-size: 12px; margin-top: 6px; color: var(--text); font-weight: 600;">${dateLabel}</p>
-            <p style="font-size: 11px; margin-top: 10px;">Try another date (or the cache may not include that day yet).</p>
+            <p class="empty-state-date">${dateLabel}</p>
+            <p class="empty-state-detail">Try another date (or the cache may not include that day yet).</p>
           </div>
         `;
         return;
@@ -2452,10 +2373,10 @@
         
         listEl.innerHTML = `
           <div class="empty-state">
-            <div class="icon">📋</div>
+            <div class="empty-state-mark" aria-hidden="true"></div>
             <p>No ${filterLabelStr} for</p>
-            <p style="font-size: 12px; margin-top: 6px; color: var(--text); font-weight: 600;">${dateLabel}</p>
-            <p style="font-size: 11px; margin-top: 10px;">Try another filter combination or date.</p>
+            <p class="empty-state-date">${dateLabel}</p>
+            <p class="empty-state-detail">Try another filter combination or date.</p>
           </div>
         `;
         return;
@@ -2962,7 +2883,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=3.2.94LAbeta', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=3.2.95LAbeta', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
