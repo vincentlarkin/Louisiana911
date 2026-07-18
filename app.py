@@ -3467,6 +3467,16 @@ def about_redirect():
     return redirect('/about/', code=301)
 
 
+@app.route('/caddo911/')
+def caddo911_landing():
+    return send_from_directory('public', 'caddo911.html')
+
+
+@app.route('/caddo911')
+def caddo911_landing_redirect():
+    return redirect('/caddo911/', code=301)
+
+
 @app.route('/reports/')
 def reports():
     return send_from_directory('public', 'reports.html')
