@@ -18,7 +18,7 @@
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/images/louisiana911-icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="/images/louisiana911-icon-192.png">
-  <link rel="manifest" href="/manifest.webmanifest?v=4.1.0">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.1.1">
   <meta name="theme-color" content="#0a0a0f">
   <meta name="color-scheme" content="dark">
   <meta name="application-name" content="Louisiana911">
@@ -83,7 +83,7 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.1.0" />
+  <link rel="stylesheet" href="styles.css?v=4.1.1" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -214,7 +214,7 @@
           </a>
         </div>
         <p class="info-credit">Made by <a class="info-credit-link" href="mailto:vincent@vincentlarkin.com">Vincent Larkin</a></p>
-        <p class="info-version">v4.1.0</p>
+        <p class="info-version">v4.1.1</p>
       </div>
     </div>
   </div>
@@ -435,7 +435,9 @@
     }).setView([32.5252, -93.7502], 11);
     const markerRenderer = L.canvas({ padding: 0.5 });
     const medicalMarkerRenderer = L.svg({ padding: 0.5 });
+    const unitPulseRenderer = L.svg({ padding: 0.5, pane: 'unitPulse' });
     const MEDICAL_MARKER_PATTERN_ID = 'medical-marker-stripes';
+    const UNIT_PULSE_THRESHOLD = 5;
     
     // Keep view constrained to a few-state window around Louisiana/Texas/Arkansas
     const southWest = L.latLng(28.7, -98.0);
@@ -457,6 +459,11 @@
     map.getPane('parish').classList.add('leaflet-parish-pane');
     map.getPane('parish').style.zIndex = 500;
     map.getPane('parish').style.pointerEvents = 'none';
+
+    map.createPane('unitPulse');
+    map.getPane('unitPulse').classList.add('leaflet-unit-pulse-pane');
+    map.getPane('unitPulse').style.zIndex = 575;
+    map.getPane('unitPulse').style.pointerEvents = 'none';
 
     // The interface has a single dark basemap so the incident colors stay consistent.
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
@@ -762,7 +769,10 @@
     let currentSort = 'recent'; // 'recent' | 'urgency'
     let mapMode = 'live'; // 'live' | 'history'
     const storedViewMode = localStorage.getItem('louisiana911ViewMode') || localStorage.getItem('caddo911ViewMode');
-    let viewMode = storedViewMode === 'list' ? 'list' : 'map';
+    const firstVisitMobileView = window.matchMedia('(max-width: 720px)').matches ? 'list' : 'map';
+    let viewMode = storedViewMode === 'list' || storedViewMode === 'map'
+      ? storedViewMode
+      : firstVisitMobileView;
     let historyPage = 1;
     const historyPageSize = 35;
     let historyTotal = 0;
@@ -1546,6 +1556,59 @@
       return `${raw} ${Math.abs(numeric) === 1 ? 'unit' : 'units'}`;
     }
 
+    function shouldPulseForUnits(incident, mode) {
+      const unitCount = Number(incident?.units);
+      return mode === 'live' && Number.isFinite(unitCount) && unitCount >= UNIT_PULSE_THRESHOLD;
+    }
+
+    function createUnitPulseRing(incident) {
+      const coordinates = incidentCoordinatePair(incident);
+      if (!coordinates) return null;
+
+      return L.circleMarker(coordinates, {
+        renderer: unitPulseRenderer,
+        pane: 'unitPulse',
+        radius: 13,
+        color: getSeverityColor(getSeverity(incident)),
+        weight: 2,
+        opacity: 0.8,
+        fill: false,
+        interactive: false,
+        className: 'unit-count-pulse',
+      });
+    }
+
+    function removeUnitPulseRing(marker) {
+      const ring = marker?._unitPulseRing;
+      if (ring && map.hasLayer(ring)) map.removeLayer(ring);
+      if (marker) marker._unitPulseRing = null;
+    }
+
+    function syncUnitPulseRing(marker, incident, mode) {
+      if (!marker) return;
+      if (!shouldPulseForUnits(incident, mode)) {
+        removeUnitPulseRing(marker);
+        return;
+      }
+
+      const coordinates = incidentCoordinatePair(incident);
+      if (!coordinates) {
+        removeUnitPulseRing(marker);
+        return;
+      }
+
+      if (!marker._unitPulseRing) {
+        marker._unitPulseRing = createUnitPulseRing(incident);
+      } else {
+        marker._unitPulseRing.setLatLng(coordinates);
+        marker._unitPulseRing.setStyle({ color: getSeverityColor(getSeverity(incident)) });
+      }
+
+      if (marker._unitPulseRing && !map.hasLayer(marker._unitPulseRing)) {
+        marker._unitPulseRing.addTo(map);
+      }
+    }
+
     function buildIncidentPopupHtml(incident, { mode = 'live' } = {}) {
       const sev = getSeverity(incident);
       const agencyDisplay = formatAgencyDisplay(incident);
@@ -1647,6 +1710,7 @@
       // Remove markers not in the next set
       markers.forEach((marker, id) => {
         if (!nextIds.has(id)) {
+          removeUnitPulseRing(marker);
           if (map.hasLayer(marker)) map.removeLayer(marker);
           markers.delete(id);
         }
@@ -1657,6 +1721,7 @@
         if (!markers.has(incident.id)) {
           const marker = createMarker(incident, { mode });
           marker.addTo(map);
+          syncUnitPulseRing(marker, incident, mode);
           markers.set(incident.id, marker);
         } else {
           const marker = markers.get(incident.id);
@@ -1664,6 +1729,7 @@
             marker.incidentData = incident;
             marker.incidentMode = mode;
             if (!map.hasLayer(marker)) marker.addTo(map);
+            syncUnitPulseRing(marker, incident, mode);
           }
         }
       });
@@ -3106,7 +3172,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.1.0', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.1.1', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);

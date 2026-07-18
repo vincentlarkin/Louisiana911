@@ -593,8 +593,8 @@
 
     .source-tabs {
       display: flex;
-      gap: 4px;
-      padding: 7px 8px;
+      gap: 6px;
+      padding: 8px;
       border-bottom: 1px solid var(--border);
       background: var(--bg-panel);
       overflow-x: auto;
@@ -608,11 +608,12 @@
     }
 
     .source-tab {
-      border: 1px solid transparent;
-      background: transparent;
+      min-height: 36px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.018);
       color: var(--text-dim);
-      border-radius: 7px;
-      padding: 6px 8px;
+      border-radius: 8px;
+      padding: 7px 10px;
       font-size: 9px;
       letter-spacing: 0.02em;
       font-weight: 600;
@@ -628,15 +629,15 @@
 
     .source-tab:hover {
       color: var(--text);
-      border-color: var(--border);
-      background: rgba(255, 255, 255, 0.03);
+      border-color: rgba(255, 255, 255, 0.16);
+      background: rgba(255, 255, 255, 0.045);
     }
 
     .source-tab.active {
       color: var(--text);
-      border-color: rgba(255, 59, 59, 0.3);
+      border-color: rgba(255, 59, 59, 0.42);
       box-shadow: none;
-      background: rgba(255, 59, 59, 0.12);
+      background: rgba(255, 59, 59, 0.14);
     }
 
     .daily-pill {
@@ -2650,6 +2651,30 @@
       0% { transform: scale(1); opacity: 1; }
       100% { transform: scale(2); opacity: 0; }
     }
+
+    .leaflet-unit-pulse-pane {
+      pointer-events: none;
+    }
+
+    .unit-count-pulse {
+      transform-box: fill-box;
+      transform-origin: center;
+      stroke-linecap: round;
+      filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.22));
+      animation: unit-count-ring-pulse 1.35s cubic-bezier(0.2, 0.65, 0.35, 1) infinite;
+    }
+
+    @keyframes unit-count-ring-pulse {
+      0% { transform: scale(0.86); opacity: 0.82; }
+      72%, 100% { transform: scale(1.42); opacity: 0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .unit-count-pulse {
+        animation: none;
+        opacity: 0.72;
+      }
+    }
     
     .leaflet-popup-content-wrapper {
       background: var(--bg-panel);
@@ -2986,18 +3011,19 @@
       }
 
       .tabs {
-        padding: 6px 8px;
+        gap: 8px;
+        padding: 7px 8px;
       }
 
       .source-tabs {
-        padding: 6px max(8px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left));
-        gap: 3px;
+        padding: 8px max(8px, env(safe-area-inset-right)) 8px max(8px, env(safe-area-inset-left));
+        gap: 7px;
       }
 
       .source-tab {
-        min-height: 36px;
-        font-size: 9px;
-        padding: 6px 8px;
+        min-height: 40px;
+        font-size: 9.5px;
+        padding: 8px 10px;
       }
 
       .source-delay-banner {
@@ -3074,8 +3100,26 @@
       }
 
       .tab {
-        padding: 10px;
+        min-height: 40px;
+        padding: 11px 10px;
         font-size: 11px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px 8px 0 0;
+        background: rgba(255, 255, 255, 0.018);
+      }
+
+      .tab:hover {
+        border-color: rgba(255, 255, 255, 0.14);
+      }
+
+      .tab.active {
+        border-color: rgba(255, 59, 59, 0.24);
+        background: rgba(255, 59, 59, 0.055);
+      }
+
+      .tab.active::after {
+        left: 12px;
+        right: 12px;
       }
 
       .filter-bar {
