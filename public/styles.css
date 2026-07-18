@@ -97,6 +97,36 @@
       display: block;
       object-fit: contain;
     }
+
+    .brand-mark {
+      display: grid;
+      place-content: center;
+      gap: 0;
+      border-color: rgba(255, 59, 59, 0.42);
+      background:
+        radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.12), transparent 36%),
+        linear-gradient(145deg, #2a0f16, #101117 70%);
+      color: var(--text);
+      text-align: center;
+      line-height: 1;
+    }
+
+    .brand-mark-state {
+      color: var(--red);
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      transform: translateX(0.08em);
+    }
+
+    .brand-mark-number {
+      margin-top: 2px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.06em;
+    }
     
     @keyframes logo-pulse {
       0%, 100% { box-shadow: 0 0 20px var(--red-glow); }
@@ -583,6 +613,14 @@
       padding: 7px 8px;
       border-bottom: 1px solid var(--border);
       background: var(--bg-panel);
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      scrollbar-width: none;
+      scroll-snap-type: x proximity;
+    }
+
+    .source-tabs::-webkit-scrollbar {
+      display: none;
     }
 
     .source-tab {
@@ -598,6 +636,9 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
+      flex: 0 0 auto;
+      scroll-snap-align: start;
+      white-space: nowrap;
       transition: all 0.2s ease;
     }
 
@@ -622,6 +663,16 @@
       border: 1px solid rgba(255, 184, 48, 0.45);
       color: var(--amber);
       background: rgba(255, 184, 48, 0.12);
+    }
+
+    .daily-pill {
+      font-size: 8px;
+      line-height: 1;
+      padding: 2px 4px;
+      border-radius: 4px;
+      border: 1px solid rgba(59, 139, 255, 0.45);
+      color: #78aaff;
+      background: rgba(59, 139, 255, 0.12);
     }
 
     .source-group {
@@ -796,6 +847,27 @@
       color: var(--text-dim);
       margin-bottom: 7px;
       line-height: 1.35;
+    }
+
+    .location-accuracy-note {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      padding: 2px 6px;
+      border: 1px solid rgba(255, 184, 48, 0.28);
+      border-radius: 999px;
+      background: rgba(255, 184, 48, 0.1);
+      color: var(--amber);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 8px;
+      font-weight: 600;
+      line-height: 1.35;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+
+    .incident-location .location-accuracy-note {
+      flex: 0 0 auto;
     }
 
     .incident-meta {
@@ -1597,6 +1669,11 @@
       background: rgba(255, 255, 255, 0.035);
       border: 1px solid rgba(255, 255, 255, 0.06);
       text-align: left;
+    }
+
+    .incident-modal-detail.approximate-location-detail {
+      border-color: rgba(255, 184, 48, 0.22);
+      background: rgba(255, 184, 48, 0.065);
     }
 
     .incident-modal-label {
@@ -2725,6 +2802,10 @@
     }
 
     @media (max-width: 720px) {
+      :root {
+        --header-height: calc(110px + env(safe-area-inset-top));
+      }
+
       body {
         min-height: 100dvh;
       }
@@ -2830,10 +2911,16 @@
       }
 
       .header {
-        padding: 10px 12px 9px;
+        height: var(--header-height);
+        min-height: var(--header-height);
+        padding:
+          calc(8px + env(safe-area-inset-top))
+          max(12px, env(safe-area-inset-right))
+          8px
+          max(12px, env(safe-area-inset-left));
         flex-direction: column;
         align-items: stretch;
-        gap: 9px;
+        gap: 7px;
       }
 
       .logo {
@@ -2843,6 +2930,14 @@
       .logo-icon {
         width: 40px;
         height: 40px;
+      }
+
+      .brand-mark-state {
+        font-size: 9px;
+      }
+
+      .brand-mark-number {
+        font-size: 12px;
       }
 
       .logo-text h1 {
@@ -2861,6 +2956,8 @@
         flex-wrap: nowrap;
         gap: 6px;
         justify-content: flex-start;
+        align-items: flex-end;
+        min-width: 0;
       }
 
       .status-item {
@@ -2889,13 +2986,14 @@
       }
 
       .source-tabs {
-        padding: 5px 6px;
+        padding: 6px max(8px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left));
         gap: 3px;
       }
 
       .source-tab {
-        font-size: 8px;
-        padding: 5px 7px;
+        min-height: 32px;
+        font-size: 9px;
+        padding: 6px 8px;
       }
 
       .panel-toggle {

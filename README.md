@@ -1,6 +1,6 @@
-# Caddo 911 Live Feed (Multi-Source)
+# Louisiana911 Public Incident Monitor
 
-Real-time incident tracker for Caddo Parish, Baton Rouge traffic incidents, and Lafayette traffic incidents with an interactive map and live/history views.
+Citizen-built Louisiana emergency incident monitor combining official live feeds and clearly labeled delayed public datasets in one interactive map.
 
 ![Dashboard](https://img.shields.io/badge/Status-Live-red) ![Python](https://img.shields.io/badge/Python-3.10+-blue) ![License](https://img.shields.io/badge/License-Proprietary-orange)
 
@@ -8,9 +8,9 @@ Real-time incident tracker for Caddo Parish, Baton Rouge traffic incidents, and 
 
 ## What It Does
 
-- **Scrapes** the official [Caddo 911 Active Events](https://ias.ecc.caddo911.com/All_ActiveEvents.aspx) feed, Baton Rouge's traffic incident feed, and Lafayette's traffic feed every cycle
+- **Collects** official public feeds from Caddo, Baton Rouge, Lafayette, and New Orleans
 - **Displays** incidents on an interactive dark-themed map with color-coded markers
-- **Supports source tabs**: `All`, `Caddo`, `Baton Rouge`, and `Lafayette (Beta)` in both Live and History views
+- **Supports source tabs**: `All`, `Caddo`, `Baton Rouge`, `Lafayette (Beta)`, and `New Orleans (Daily)` in Latest and History views
 - **Groups incidents by source** in `All` mode (not interleaved)
 - **Filters** by agency and urgency/severity
 - **Caches** incidents to SQLite for live + historical views
@@ -88,13 +88,16 @@ python app.py --backup --backup-main-only
 
 ### Environment (optional)
 
-- `CADDO911_DB_PATH` (default: auto-detect `data/caddo911.db`, sibling `../data/caddo911.db`, `/data/caddo911.db`, then `caddo911.db`)
-- `CADDO911_DATA_DIR` (optional data directory used during DB auto-detection)
-- `CADDO911_ARCHIVE_DAYS` (default: `30`)
-- `CADDO911_BACKUP_DIR` (default: `<db dir>/backups`)
-- `CADDO911_BACKUP_RETENTION_WEEKS` (default: `5`, keep the most recent 5 weekly snapshots per DB)
-- `CADDO911_AUTH_TOKEN` or `CADDO911_AUTH_USER` + `CADDO911_AUTH_PASS`
-- `CADDO911_ENABLE_REFRESH_ENDPOINT` (set to `1` to enable `/api/refresh`)
+- `LOUISIANA911_DB_PATH` (default: auto-detect `data/caddo911.db`, sibling `../data/caddo911.db`, `/data/caddo911.db`, then `caddo911.db`)
+- `LOUISIANA911_DATA_DIR` (optional data directory used during DB auto-detection)
+- `LOUISIANA911_ARCHIVE_DAYS` (default: `30`)
+- `LOUISIANA911_BACKUP_DIR` (default: `<db dir>/backups`)
+- `LOUISIANA911_BACKUP_RETENTION_WEEKS` (default: `5`, keep the most recent 5 weekly snapshots per DB)
+- `LOUISIANA911_NOLA_DATASET_ID` (default: `es9j-6y5d`; update when the City publishes a new annual Calls for Service dataset)
+- `LOUISIANA911_AUTH_TOKEN` or `LOUISIANA911_AUTH_USER` + `LOUISIANA911_AUTH_PASS`
+- `LOUISIANA911_ENABLE_REFRESH_ENDPOINT` (set to `1` to enable `/api/refresh`)
+
+Every `LOUISIANA911_*` setting also accepts its previous `CADDO911_*` name so existing deployments do not need an abrupt migration.
 
 Automatic schedules:
 - Daily archive: `3:00 AM` Central (`--no-auto-archive` to disable)
@@ -114,11 +117,11 @@ This repo also includes wiki pages in `wiki/`:
 
 ## How It Works
 
-1. **Scraping**: Uses source adapters in `sources/` (`caddo` + `batonrouge` + `lafayette`) to fetch and normalize incidents into one shared data shape.
+1. **Collection**: Uses source adapters in `sources/` (`caddo` + `batonrouge` + `lafayette` + `neworleans`) to fetch and normalize incidents into one shared data shape. New Orleans is an official delayed daily dataset and is labeled accordingly.
 2. **Deduplication**: Each incident gets a source-aware hash based on source, agency, time, description, and location.
-3. **Geocoding**: Validates actual road intersections from ArcGIS provider metadata. Two cross streets are treated as endpoints bracketing the named street, and their midpoint is used when both endpoints validate. Unverified provider guesses are not mapped.
+3. **Geocoding**: Validates actual road intersections from ArcGIS provider metadata. Two cross streets are treated as endpoints bracketing the named street, and their midpoint is used when both endpoints validate. For New Orleans records with `POINT(0 0)`, the importer can map the published block/intersection text as an explicitly approximate location while preserving the original public label. Unverified provider guesses are not mapped.
 4. **Storage**: Incidents stored in `caddo911.db` (SQLite) with source, timestamps, and active/inactive status.
-5. **Archiving**: Inactive incidents older than `CADDO911_ARCHIVE_DAYS` move to `caddo911_archive_YYYY_MM.db`.
+5. **Archiving**: Inactive incidents older than `LOUISIANA911_ARCHIVE_DAYS` move to the existing compatible `caddo911_archive_YYYY_MM.db` files.
 6. **Backup snapshots**: Weekly SQLite-consistent snapshots are written to `backups/` (configurable).
 7. **Frontend**: Single-page app with Leaflet.js map, source tabs, and shared filters for Live + History views.
 
@@ -133,6 +136,7 @@ This repo also includes wiki pages in `wiki/`:
 | POLICE | Lafayette Police label |
 | SHERIFF | Lafayette Sheriff label |
 | FIRE | Lafayette Fire label |
+| NOPD | New Orleans Police Department calls for service |
 
 ## Data Sources
 
@@ -144,6 +148,26 @@ This app currently ingests from:
   `https://city.brla.gov/traffic/incidents.asp`
 - Lafayette Parish traffic feed endpoint (beta integration):  
   `https://lafayette911.org/wp-json/traffic-feed/v1/data`
+- City of New Orleans / NOPD Calls for Service dataset supplied by OPCD (daily):
+  `https://data.nola.gov/resource/es9j-6y5d.json`
+
+### New Orleans inclusion filter
+
+The City dataset is much broader than a literal list of emergency calls. Louisiana911 imports only the newest two published dates and excludes all rows marked `selfinitiated = Y` (officer-initiated activity).
+
+The following final call types are also excluded as routine/generic activity:
+
+- `AREA CHECK`
+- `BUSINESS CHECK`
+- `COMPLAINT OTHER`
+- `DISTURBANCE (OTHER)`
+- `FUGITIVE ATTACHMENT`
+- `INCIDENT REQUESTED BY ANOTHER AGENCY`
+- `MENTAL PATIENT`
+- `RETURN FOR ADDITIONAL INFO`
+- `TOW IMPOUNDED VEHICLE (PRIVATE)`
+
+Crime-preservation rule: if one of those generic final types has a non-generic `initialtypetext`, the call remains in Louisiana911 under `<initial type> (initial classification)`. This prevents a reported theft, battery, burglary, robbery, protection-order violation, or other potentially material call from disappearing merely because NOPD later moved it into a generic final category. Filtering controls what Louisiana911 imports; it does not alter the official Data.NOLA dataset.
 
 ## Files
 
@@ -153,6 +177,7 @@ This app currently ingests from:
 | `sources/caddo.py` | Caddo source adapter |
 | `sources/batonrouge.py` | Baton Rouge source adapter |
 | `sources/lafayette.py` | Lafayette source adapter |
+| `sources/neworleans.py` | New Orleans daily calls-for-service adapter |
 | `public/index.html` | Dashboard UI with map + filters |
 | `public/styles.css` | Frontend styling |
 | `public/images/` | Logos and agency icons |
@@ -164,7 +189,7 @@ This app currently ingests from:
 ## Tips
 
 - **Geocoding improves over time**: The app stores a geocoder version with each result. Active rows made by an older algorithm are re-checked automatically (no DB wipe required); use `python app.py --regeocode` to refresh inactive rows in the main database.
-- **Choose source scope**: Use `All`, `Caddo`, `Baton Rouge`, or `Lafayette (Beta)` to control which feed is visible.
+- **Choose source scope**: Use `All`, `Caddo`, `Baton Rouge`, `Lafayette (Beta)`, or `New Orleans (Daily)` to control which feed is visible.
 - **Filter incidents**: Use filter buttons to focus on agency types and urgency/severity.
 - **Historical view**: Switch to "History" tab and select a date to browse past incidents
 

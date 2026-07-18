@@ -21,6 +21,6 @@ USER appuser
 
 EXPOSE 3911
 
-ENV CADDO911_DB_PATH=/data/caddo911.db
+ENV LOUISIANA911_DB_PATH=/data/caddo911.db
 
 CMD ["python", "app.py", "--mode", "serve", "--host", "0.0.0.0", "--port", "3911"]
