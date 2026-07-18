@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>About Louisiana 911 &amp; Caddo 911 Coverage | Louisiana911</title>
+  <meta name="description" content="Learn how Louisiana911 combines official Caddo 911, Baton Rouge, Lafayette, and New Orleans public incident feeds with transparent location accuracy.">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="https://louisiana911.com/about/">
+  <meta name="theme-color" content="#0a0a0f">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.0.2">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #08090d;
+      --panel: #12141b;
+      --card: #171922;
+      --border: rgba(255, 255, 255, 0.1);
+      --text: #f1f2f5;
+      --dim: #a2a7b4;
+      --red: #ff4d55;
+      --blue: #5e9eff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(94, 158, 255, 0.12), transparent 30%),
+        radial-gradient(circle at 88% 12%, rgba(255, 77, 85, 0.10), transparent 30%),
+        var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    a { color: inherit; }
+    .shell { width: min(920px, calc(100vw - 28px)); margin: 0 auto; padding: 24px 0 52px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 36px; }
+    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; font-family: 'Space Grotesk', sans-serif; font-weight: 700; }
+    .mark { display: grid; place-content: center; width: 44px; height: 44px; border: 1px solid rgba(255,77,85,.42); border-radius: 50%; background: #190d12; color: var(--red); font-size: 11px; text-align: center; line-height: 1.1; }
+    .mark strong { display: block; color: var(--text); font-size: 13px; }
+    .back { padding: 10px 13px; border: 1px solid var(--border); border-radius: 9px; text-decoration: none; font-size: 11px; }
+    .hero, .notice, .source { border: 1px solid var(--border); background: rgba(18,20,27,.92); box-shadow: 0 20px 70px rgba(0,0,0,.28); }
+    .hero { padding: clamp(24px, 6vw, 54px); border-radius: 22px; }
+    .eyebrow { margin: 0 0 12px; color: var(--red); font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    h1, h2 { margin: 0; font-family: 'Space Grotesk', sans-serif; }
+    h1 { max-width: 760px; font-size: clamp(34px, 7vw, 62px); line-height: .98; letter-spacing: -.045em; }
+    .lede { max-width: 760px; margin: 22px 0 0; color: var(--dim); font-family: 'Space Grotesk', sans-serif; font-size: clamp(17px, 2.5vw, 21px); line-height: 1.55; }
+    .notice { margin: 18px 0 34px; padding: 17px 19px; border-color: rgba(255,77,85,.28); border-radius: 13px; color: #d9dbe2; font-size: 12px; line-height: 1.7; }
+    .sources { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+    .source { padding: 21px; border-radius: 15px; }
+    .source h2 { font-size: 20px; }
+    .cadence { display: inline-flex; margin: 11px 0 12px; padding: 5px 8px; border: 1px solid rgba(94,158,255,.35); border-radius: 999px; color: #8bb7ff; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+    .source p { margin: 0 0 16px; color: var(--dim); font-family: 'Space Grotesk', sans-serif; line-height: 1.6; }
+    .source a { color: var(--blue); font-size: 11px; }
+      .privacy { margin: 40px 0 0; }
+      .privacy h2 { margin-bottom: 12px; font-size: 26px; }
+      .privacy p { color: var(--dim); font-family: 'Space Grotesk', sans-serif; line-height: 1.7; }
+      .methodology ul { columns: 2; margin: 14px 0 16px; padding-left: 20px; color: var(--dim); line-height: 1.8; }
+      .methodology li { break-inside: avoid; padding-right: 18px; }
+    footer { margin-top: 42px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--dim); font-size: 10px; line-height: 1.7; }
+      @media (max-width: 640px) {
+      .shell { padding-top: max(16px, env(safe-area-inset-top)); }
+        .sources { grid-template-columns: 1fr; }
+        .methodology ul { columns: 1; }
+      .back { padding: 9px 10px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <nav class="topbar" aria-label="Primary navigation">
+      <a class="brand" href="/"><span class="mark">LA<strong>911</strong></span><span>Louisiana911</span></a>
+      <a class="back" href="/">Open incident map</a>
+    </nav>
+
+    <header class="hero">
+      <p class="eyebrow">Made for Louisiana</p>
+      <h1>Public emergency information, gathered with care.</h1>
+      <p class="lede">Louisiana911 brings separate official public-safety feeds into one readable map. The project grew from the Caddo 911 monitor and now serves a wider Louisiana audience without erasing its Caddo roots.</p>
+    </header>
+
+    <p class="notice"><strong>Louisiana911 is not an emergency service.</strong> Information can be delayed, incomplete, changed, or removed. Never use this site to decide whether to seek help. Call 911 for an emergency.</p>
+
+    <section class="sources" aria-label="Current data sources">
+      <article class="source">
+        <h2>Caddo Parish</h2><span class="cadence">Live active events</span>
+        <p>Police, fire, EMS, sheriff, and parish fire-district events from the Caddo Parish 911 public feed.</p>
+        <a href="https://ias.ecc.caddo911.com/All_ActiveEvents.aspx" rel="noopener noreferrer">Official Caddo 911 feed</a>
+      </article>
+      <article class="source">
+        <h2>Baton Rouge</h2><span class="cadence">Live traffic</span>
+        <p>Current traffic incidents published by the City of Baton Rouge and Parish of East Baton Rouge.</p>
+        <a href="https://city.brla.gov/traffic/incidents.asp" rel="noopener noreferrer">Official Baton Rouge feed</a>
+      </article>
+      <article class="source">
+        <h2>Lafayette Parish</h2><span class="cadence">Live traffic · Beta</span>
+        <p>Current traffic conditions published by the Lafayette Parish Communication District.</p>
+        <a href="https://lafayette911.org/traffic/" rel="noopener noreferrer">Official Lafayette feed</a>
+      </article>
+      <article class="source">
+        <h2>New Orleans</h2><span class="cadence">Daily calls for service</span>
+        <p>Citizen-initiated NOPD calls for service supplied by OPCD and published by the City at block or intersection level.</p>
+        <a href="https://data.nola.gov/Public-Safety-and-Preparedness/Calls-for-Service-2026/es9j-6y5d" rel="noopener noreferrer">Official Data.NOLA dataset</a>
+      </article>
+    </section>
+
+    <section class="privacy">
+      <h2>Location uncertainty stays visible.</h2>
+      <p>Louisiana911 preserves the public location label supplied by each source. When New Orleans publishes a block or intersection but supplies <code>POINT(0 0)</code> instead of a usable map point, the site may derive an approximate marker from that same public text. Those markers are larger, dashed, and explicitly labeled approximate; the displayed address is never made more specific than NOPD's published label.</p>
+    </section>
+
+    <section class="privacy methodology">
+      <h2>What Louisiana911 filters from New Orleans.</h2>
+      <p>The NOPD Calls for Service dataset includes officer activity and routine administrative traffic that is not useful for this crime and public-safety view. Louisiana911 first excludes officer-initiated rows, then omits these generic final call types:</p>
+      <ul>
+        <li>Area Check</li>
+        <li>Business Check</li>
+        <li>Complaint Other</li>
+        <li>Disturbance (Other)</li>
+        <li>Fugitive Attachment</li>
+        <li>Incident Requested by Another Agency</li>
+        <li>Mental Patient</li>
+        <li>Return for Additional Info</li>
+        <li>Tow Impounded Vehicle (Private)</li>
+      </ul>
+      <p>If a generic final type began with a non-generic initial classification, Louisiana911 keeps it under that initial classification. This safeguard retains potentially material reports such as theft, battery, burglary, robbery, or protection-order violations while still removing routine city noise.</p>
+    </section>
+
+    <footer>Citizen-run and independently maintained by Vincent Larkin. Not affiliated with or endorsed by any government, 911 district, or responding agency.</footer>
+  </main>
+</body>
+</html>

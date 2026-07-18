@@ -4,11 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <base href="/">
-  <title>Caddo 911 Monthly Reports</title>
+  <title>Louisiana 911 Monthly Incident Reports | Louisiana911</title>
+  <meta name="description" content="Compare monthly public emergency incident trends and hotspots across Louisiana source areas.">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="https://louisiana911.com/reports/monthly/">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/images/caddo911-icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="/images/caddo911-icon-192.png">
-  <link rel="manifest" href="/manifest.webmanifest?v=3.2.97LAbeta">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.0.2">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -564,13 +567,13 @@
   <div class="page-shell">
     <header class="hero">
       <div class="hero-copy">
-        <p class="eyebrow">Caddo 911 Analytics</p>
+        <p class="eyebrow">Louisiana 911 Analytics</p>
         <h1>Monthly Incident Reports</h1>
         <p>Review the top incident type for any available month, see the strongest 3-mile hotspot, and compare the top 10 incident categories.</p>
       </div>
       <div class="hero-actions">
         <a class="hero-link" href="/reports">Reports</a>
-        <a class="hero-link" href="/">Back to Live Map</a>
+        <a class="hero-link" href="/">Back to Incident Map</a>
         <a class="hero-link primary" href="https://github.com/vincentlarkin/Caddo911-Monitor" target="_blank" rel="noopener noreferrer">Project GitHub</a>
       </div>
     </header>
@@ -590,6 +593,7 @@
           <option value="caddo">Caddo</option>
           <option value="batonrouge">Baton Rouge</option>
           <option value="lafayette">Lafayette</option>
+          <option value="neworleans">New Orleans</option>
         </select>
       </label>
       <button class="load-btn" id="report-load" type="button">Load Report</button>
@@ -718,6 +722,7 @@
       if (source === 'all') return 'All sources';
       if (source === 'batonrouge') return 'Baton Rouge only';
       if (source === 'lafayette') return 'Lafayette only';
+      if (source === 'neworleans') return 'New Orleans only';
       return 'Caddo only';
     }
 

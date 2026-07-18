@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-CADDO 911 Live Feed - Real-time emergency incident tracker
-Scrapes Caddo Parish 911 dispatch data and displays on interactive map
+Louisiana 911 - statewide public emergency incident monitor.
+
+Aggregates official live and delayed public-safety feeds without claiming to
+be an emergency service or a replacement for calling 911.
 """
 
 import sqlite3
@@ -23,8 +25,21 @@ from zoneinfo import ZoneInfo
 from sources import caddo as caddo_source
 from sources import lafayette as lafayette_source
 from sources import batonrouge as batonrouge_source
+from sources import neworleans as neworleans_source
 
 app = Flask(__name__, static_folder='public', static_url_path='')
+
+
+def _env_setting(name: str, legacy_name: str, default: str = '') -> str:
+    """Read the Louisiana911 setting while preserving Caddo911 deployments."""
+    primary = os.environ.get(name)
+    if primary is not None:
+        return primary
+    legacy = os.environ.get(legacy_name)
+    if legacy is not None:
+        return legacy
+    return default
+
 
 # Database setup
 def _resolve_db_path() -> str:
@@ -33,16 +48,16 @@ def _resolve_db_path() -> str:
 
     Production installs commonly keep the git checkout in ./repo and the
     persistent SQLite files in a sibling ./data directory. Keep
-    CADDO911_DB_PATH as the strongest override, then auto-detect that layout so
-    report pages read the same DBs as the scraper.
+    LOUISIANA911_DB_PATH (or the legacy CADDO911_DB_PATH) is the strongest
+    override. The stored filename remains compatible with existing installs.
     """
-    configured_path = os.environ.get('CADDO911_DB_PATH', '').strip()
+    configured_path = _env_setting('LOUISIANA911_DB_PATH', 'CADDO911_DB_PATH').strip()
     if configured_path:
         return os.path.expanduser(configured_path)
 
     app_dir = os.path.dirname(os.path.abspath(__file__))
     cwd = os.getcwd()
-    configured_data_dir = os.environ.get('CADDO911_DATA_DIR', '').strip()
+    configured_data_dir = _env_setting('LOUISIANA911_DATA_DIR', 'CADDO911_DATA_DIR').strip()
     candidate_dirs = [
         configured_data_dir,
         os.path.join(app_dir, 'data'),
@@ -69,8 +84,8 @@ def _resolve_db_path() -> str:
 DB_PATH = _resolve_db_path()
 
 # Archive settings: incidents older than this many days get moved to monthly archive DBs
-ARCHIVE_AFTER_DAYS = int(os.environ.get('CADDO911_ARCHIVE_DAYS', '30'))
-BACKUP_RETENTION_WEEKS = int(os.environ.get('CADDO911_BACKUP_RETENTION_WEEKS', '5'))
+ARCHIVE_AFTER_DAYS = int(_env_setting('LOUISIANA911_ARCHIVE_DAYS', 'CADDO911_ARCHIVE_DAYS', '30'))
+BACKUP_RETENTION_WEEKS = int(_env_setting('LOUISIANA911_BACKUP_RETENTION_WEEKS', 'CADDO911_BACKUP_RETENTION_WEEKS', '5'))
 REPORT_CACHE_VERSION = 4
 
 def _get_archive_dir() -> str:
@@ -95,7 +110,7 @@ def _list_archive_dbs() -> list[str]:
 
 def _get_backup_dir() -> str:
     """Directory where periodic backup snapshots are written."""
-    configured = os.environ.get('CADDO911_BACKUP_DIR', '').strip()
+    configured = _env_setting('LOUISIANA911_BACKUP_DIR', 'CADDO911_BACKUP_DIR').strip()
     if configured:
         return configured
     return os.path.join(_get_archive_dir(), "backups")
@@ -252,12 +267,17 @@ def _init_archive_db(path: str) -> None:
 # Scraper/status metadata
 SCRAPE_INTERVAL_SECONDS_DEFAULT = 60
 feed_refreshed_at: str | None = None  # backwards-compatible: Caddo refresh text
-feed_refreshed_by_source: dict[str, str | None] = {"caddo": None, "lafayette": None, "batonrouge": None}
+feed_refreshed_by_source: dict[str, str | None] = {
+    "caddo": None,
+    "lafayette": None,
+    "batonrouge": None,
+    "neworleans": None,
+}
 last_scrape_started_at: str | None = None  # ISO UTC
 last_scrape_finished_at: str | None = None  # ISO UTC
 
 # Identify the scraper politely in upstream logs.
-SCRAPER_USER_AGENT = "Friendly - Caddo911.vincentlarkin.com (+https://caddo911.vincentlarkin.com)"
+SCRAPER_USER_AGENT = "Louisiana911.com public-safety feed monitor (+https://louisiana911.com/)"
 
 QUIET = False
 
@@ -591,16 +611,16 @@ except Exception as e:
     log(f"[WARN] Database init failed: {e}")
 
 # --- Security hardening (optional auth + headers) ---
-AUTH_TOKEN = os.environ.get('CADDO911_AUTH_TOKEN')
-AUTH_USER = os.environ.get('CADDO911_AUTH_USER')
-AUTH_PASS = os.environ.get('CADDO911_AUTH_PASS')
+AUTH_TOKEN = _env_setting('LOUISIANA911_AUTH_TOKEN', 'CADDO911_AUTH_TOKEN') or None
+AUTH_USER = _env_setting('LOUISIANA911_AUTH_USER', 'CADDO911_AUTH_USER') or None
+AUTH_PASS = _env_setting('LOUISIANA911_AUTH_PASS', 'CADDO911_AUTH_PASS') or None
 
 # Simple in-process report rate limiting. This is intentionally lightweight:
 # enough to slow accidental refresh loops and casual abuse without adding
 # infrastructure or dependencies.
-REPORT_PAGE_RATE_LIMIT = int(os.environ.get('CADDO911_REPORT_PAGE_RATE_LIMIT', '120'))
-REPORT_API_RATE_LIMIT = int(os.environ.get('CADDO911_REPORT_API_RATE_LIMIT', '90'))
-REPORT_RATE_WINDOW_SECONDS = int(os.environ.get('CADDO911_REPORT_RATE_WINDOW_SECONDS', '60'))
+REPORT_PAGE_RATE_LIMIT = int(_env_setting('LOUISIANA911_REPORT_PAGE_RATE_LIMIT', 'CADDO911_REPORT_PAGE_RATE_LIMIT', '120'))
+REPORT_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_REPORT_API_RATE_LIMIT', 'CADDO911_REPORT_API_RATE_LIMIT', '90'))
+REPORT_RATE_WINDOW_SECONDS = int(_env_setting('LOUISIANA911_REPORT_RATE_WINDOW_SECONDS', 'CADDO911_REPORT_RATE_WINDOW_SECONDS', '60'))
 _report_rate_lock = Lock()
 _report_rate_hits: dict[tuple[str, str], list[float]] = {}
 
@@ -719,9 +739,9 @@ geocode_cache = {}
 geocode_intersection_cache = {}
 
 # Increment whenever stored coordinates need to be reconsidered because the
-# validation/ranking algorithm changed. Version 4 also removes CAD-only road
-# discriminators such as the trailing "1" in "NELSON ST 1" before matching.
-GEOCODER_VERSION = 4
+# validation/ranking algorithm changed. Version 4 removed CAD-only road
+# discriminators; version 5 adds validated NOPD block/intersection fallbacks.
+GEOCODER_VERSION = 5
 ARCGIS_INTERSECTION_MIN_SCORE = 90.0
 ARCGIS_STREET_MIN_SCORE = 85.0
 ARCGIS_ADDRESS_MIN_SCORE = 90.0
@@ -885,6 +905,17 @@ SOURCE_GEO_PROFILES = {
         "default_city": "Baton Rouge",
         "county": "East Baton Rouge Parish",
         "area_sq_miles": 470.0,
+    },
+    "neworleans": {
+        "lat_min": 29.80,
+        "lat_max": 30.20,
+        "lon_min": -90.35,
+        "lon_max": -89.60,
+        "center_lat": 29.9511,
+        "center_lon": -90.0715,
+        "default_city": "New Orleans",
+        "county": "Orleans Parish",
+        "area_sq_miles": 350.0,
     },
 }
 
@@ -1649,10 +1680,14 @@ def geocode_address(street, cross_streets, municipality, source: str = 'caddo'):
 def hash_incident(incident):
     """Generate unique hash for incident deduplication"""
     source = _normalize_source_name(incident.get('source') if isinstance(incident, dict) else None)
-    key = (
-        f"{source}-{incident['agency']}-{incident['time']}-"
-        f"{incident['description']}-{incident['street']}-{incident['cross_streets']}"
-    )
+    source_id = _clean_ws(incident.get('source_id') if isinstance(incident, dict) else '')
+    if source_id:
+        key = f"{source}-{source_id}"
+    else:
+        key = (
+            f"{source}-{incident['agency']}-{incident['time']}-"
+            f"{incident['description']}-{incident['street']}-{incident['cross_streets']}"
+        )
     return hashlib.md5(key.encode()).hexdigest()
 
 def scrape_caddo_incidents():
@@ -1690,6 +1725,17 @@ def scrape_batonrouge_incidents():
         return [], None
 
 
+def scrape_neworleans_incidents():
+    """Import the official delayed NOPD calls-for-service log."""
+    try:
+        return neworleans_source.scrape(user_agent=SCRAPER_USER_AGENT, timeout_seconds=30)
+    except Exception as e:
+        log(f"New Orleans scraping error: {e}")
+        import traceback
+        traceback.print_exc()
+        return [], None
+
+
 # Backwards compatibility for any old call sites.
 def scrape_incidents():
     return scrape_caddo_incidents()
@@ -1697,6 +1743,151 @@ def scrape_incidents():
 # Track last update time
 last_update: str | None = None
 scrape_interval_seconds: int = SCRAPE_INTERVAL_SECONDS_DEFAULT
+source_last_scrape_monotonic: dict[str, float] = {}
+SOURCE_MIN_SCRAPE_INTERVAL_SECONDS = {
+    # Data.NOLA publishes this dataset in daily batches. Polling it every live
+    # feed cycle would create load without making the site any fresher.
+    'neworleans': 15 * 60,
+}
+
+
+NOLA_APPROX_LOCATION_RE = re.compile(
+    r"^\s*approx(?:imate)?\s+loc(?:ation)?\s*:\s*",
+    flags=re.IGNORECASE,
+)
+NOLA_UNUSABLE_PUBLIC_LOCATIONS = {
+    "",
+    "UNKNOWN",
+    "REDACTED",
+    "REDACTED BLOCK",
+    "CONFIDENTIAL",
+    "WITHHELD",
+}
+
+
+def _expand_public_block_number(value: str) -> str:
+    """Turn a public block mask such as 035XX into a block anchor (3500)."""
+    text = _clean_ws(value)
+    match = re.match(r"^(\d+)(X{2,})(?=\s)", text, flags=re.IGNORECASE)
+    if not match:
+        return text
+    block_number = int(match.group(1)) * (10 ** len(match.group(2)))
+    expanded = f"{block_number}{text[match.end():]}"
+    return re.sub(r"^(\d+)\s+BLK\s+", r"\1 ", expanded, flags=re.IGNORECASE)
+
+
+def _normalize_new_orleans_geocode_text(value: str) -> str:
+    """Normalize known public-feed notation without changing its display."""
+    text = _clean_ws(value)
+    text = re.sub(r"\bCHEF\s+MENTUER\b", "Chef Menteur", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bUS\s*(\d+)B\b", r"US \1 BUS", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bEARHART\s+ONRAMP\b", "Earhart Blvd", text, flags=re.IGNORECASE)
+    return text
+
+
+def _new_orleans_public_location_parts(incident: dict) -> tuple[str | None, str | None, bool]:
+    """Prepare only NOPD's published label for approximate geocoding."""
+    public_label = _clean_ws(incident.get('street') or '')
+    explicitly_approximate = bool(incident.get('location_is_approximate'))
+    prefix_match = NOLA_APPROX_LOCATION_RE.match(public_label)
+    if prefix_match:
+        explicitly_approximate = True
+        public_label = public_label[prefix_match.end():].strip()
+
+    if public_label.upper() in NOLA_UNUSABLE_PUBLIC_LOCATIONS:
+        return None, None, explicitly_approximate
+
+    public_label = _normalize_new_orleans_geocode_text(public_label)
+    public_cross = _clean_ws(incident.get('cross_streets') or '')
+    if not public_cross:
+        # NOPD commonly stores intersections entirely in block_address.
+        parts = re.split(
+            r"\s*(?:&|/|@)\s*|\s+\b(?:AND|AT|AFTER|BEFORE|NEAR)\b\s+",
+            public_label,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )
+        if len(parts) == 2 and all(_clean_ws(part) for part in parts):
+            public_label, public_cross = (_clean_ws(part) for part in parts)
+
+    # NOPD publishes block masks rather than exact premises. A block anchor is
+    # used only to obtain an approximate map point; the stored/displayed label
+    # remains the original 035XX-style public value.
+    public_label = _expand_public_block_number(public_label)
+    public_cross = _normalize_new_orleans_geocode_text(public_cross)
+    return public_label or None, public_cross or None, explicitly_approximate
+
+
+def _incident_geocode_result(incident: dict, source_name: str) -> dict:
+    raw_lat = incident.get('latitude')
+    raw_lon = incident.get('longitude')
+    try:
+        latitude = float(raw_lat)
+        longitude = float(raw_lon)
+    except (TypeError, ValueError):
+        latitude = None
+        longitude = None
+
+    if (
+        latitude is not None
+        and longitude is not None
+        and math.isfinite(latitude)
+        and math.isfinite(longitude)
+        and _is_in_source_bounds(latitude, longitude, source_name)
+    ):
+        is_approximate = bool(
+            source_name == 'neworleans'
+            and (
+                incident.get('location_is_approximate')
+                or NOLA_APPROX_LOCATION_RE.match(_clean_ws(incident.get('street') or ''))
+            )
+        )
+        return {
+            'lat': latitude,
+            'lng': longitude,
+            'source': 'source-feed',
+            'quality': 'approximate-published' if is_approximate else 'published',
+            'query': (
+                'Official source coordinates; location labeled approximate'
+                if is_approximate
+                else 'Official source coordinates'
+            ),
+            'provider_responded': True,
+        }
+
+    if source_name == 'neworleans':
+        public_street, public_cross, _ = _new_orleans_public_location_parts(incident)
+        if not public_street and not public_cross:
+            return {
+                'lat': None,
+                'lng': None,
+                'source': 'source-feed-unmapped',
+                'quality': 'location-unavailable',
+                'query': None,
+                'provider_responded': True,
+            }
+
+        result = geocode_address(
+            public_street,
+            public_cross,
+            incident.get('municipality'),
+            source=source_name,
+        )
+        if result.get('lat') is not None and result.get('lng') is not None:
+            result = dict(result)
+            base_quality = result.get('quality') or 'location'
+            result['quality'] = f"approximate-{base_quality}"
+            # Do not expose the internal block-anchor query as a more specific
+            # address. The user-facing location stays exactly as NOPD supplied.
+            result['query'] = 'Approximate from public NOPD block/intersection label'
+        return result
+
+    return geocode_address(
+        incident.get('street'),
+        incident.get('cross_streets'),
+        incident.get('municipality'),
+        source=source_name,
+    )
 
 def process_incidents(incidents, *, source: str = 'caddo'):
     """Store/update incidents in database"""
@@ -1717,11 +1908,15 @@ def process_incidents(incidents, *, source: str = 'caddo'):
         incident['source'] = incident_source
         h = hash_incident(incident)
         current_hashes.add(h)
+        desired_active = 1 if incident.get('is_active', True) else 0
+        occurred_at = incident.get('occurred_at')
+        if not isinstance(occurred_at, str) or not _parse_iso_datetime(occurred_at):
+            occurred_at = None
 
         # Check if exists
         try:
             cursor.execute(
-                'SELECT id, latitude, longitude, geocode_source, geocode_quality, geocode_version FROM incidents WHERE hash = ?',
+                'SELECT id, latitude, longitude, geocode_source, geocode_quality, geocode_version, street FROM incidents WHERE hash = ?',
                 (h,)
             )
             existing = cursor.fetchone()
@@ -1729,7 +1924,7 @@ def process_incidents(incidents, *, source: str = 'caddo'):
         except sqlite3.OperationalError:
             try:
                 cursor.execute(
-                    'SELECT id, latitude, longitude, geocode_source, geocode_quality FROM incidents WHERE hash = ?',
+                    'SELECT id, latitude, longitude, geocode_source, geocode_quality, street FROM incidents WHERE hash = ?',
                     (h,)
                 )
                 existing = cursor.fetchone()
@@ -1744,14 +1939,95 @@ def process_incidents(incidents, *, source: str = 'caddo'):
             # Refresh mutable feed fields instead of freezing their first value.
             try:
                 cursor.execute(
-                    'UPDATE incidents SET last_seen = ?, is_active = 1, source = ?, units = ? WHERE hash = ?',
-                    (now, incident_source, incident.get('units'), h),
+                    '''UPDATE incidents
+                       SET last_seen = ?, is_active = ?, source = ?, agency = ?, time = ?, units = ?,
+                           description = ?, street = ?, cross_streets = ?, municipality = ?,
+                           first_seen = COALESCE(?, first_seen)
+                       WHERE hash = ?''',
+                    (
+                        now,
+                        desired_active,
+                        incident_source,
+                        incident.get('agency'),
+                        incident.get('time'),
+                        incident.get('units'),
+                        incident.get('description'),
+                        incident.get('street'),
+                        incident.get('cross_streets'),
+                        incident.get('municipality'),
+                        occurred_at,
+                        h,
+                    ),
                 )
             except sqlite3.OperationalError:
                 cursor.execute(
-                    'UPDATE incidents SET last_seen = ?, is_active = 1, units = ? WHERE hash = ?',
-                    (now, incident.get('units'), h),
+                    'UPDATE incidents SET last_seen = ?, is_active = ?, units = ? WHERE hash = ?',
+                    (now, desired_active, incident.get('units'), h),
                 )
+
+            if incident_source == 'neworleans':
+                # Re-apply NOPD's current point state on every import. If the
+                # official point is 0,0, fall back to the public block or
+                # intersection label and mark the result as approximate.
+                existing_lat = existing[1]
+                existing_lng = existing[2]
+                existing_quality = existing[4] if existing_cols in ("new", "versioned") and len(existing) > 4 else None
+                existing_version = existing[5] if existing_cols == "versioned" and len(existing) > 5 else None
+                existing_street = (
+                    existing[6]
+                    if existing_cols == "versioned" and len(existing) > 6
+                    else existing[5]
+                    if existing_cols == "new" and len(existing) > 5
+                    else None
+                )
+                raw_lat = incident.get('latitude')
+                raw_lng = incident.get('longitude')
+                try:
+                    has_official_point = _is_in_source_bounds(
+                        float(raw_lat), float(raw_lng), incident_source
+                    )
+                except (TypeError, ValueError):
+                    has_official_point = False
+
+                public_street, public_cross, _ = _new_orleans_public_location_parts(incident)
+                has_public_location = bool(public_street or public_cross)
+                reusable_approximation = (
+                    not has_official_point
+                    and has_public_location
+                    and existing_lat is not None
+                    and existing_lng is not None
+                    and str(existing_quality or '').startswith('approximate-')
+                    and existing_version == GEOCODER_VERSION
+                    and _clean_ws(existing_street or '') == _clean_ws(incident.get('street') or '')
+                )
+                if reusable_approximation:
+                    continue
+
+                current_geo = _incident_geocode_result(incident, incident_source)
+                has_current_coords = (
+                    current_geo.get('lat') is not None
+                    and current_geo.get('lng') is not None
+                )
+                provider_confirmed = has_current_coords or bool(current_geo.get('provider_responded'))
+                if provider_confirmed:
+                    cursor.execute(
+                        '''UPDATE incidents
+                           SET latitude = ?, longitude = ?, geocode_source = ?,
+                               geocode_quality = ?, geocode_query = ?, geocoded_at = ?,
+                               geocode_version = ?
+                           WHERE hash = ?''',
+                        (
+                            current_geo.get('lat'),
+                            current_geo.get('lng'),
+                            current_geo.get('source'),
+                            current_geo.get('quality'),
+                            current_geo.get('query'),
+                            now,
+                            GEOCODER_VERSION,
+                            h,
+                        ),
+                    )
+                continue
 
             # Opportunistic re-geocode: if we previously fell back (or have no coords),
             # try again using the improved intersection logic. This keeps your DB, but improves
@@ -1767,12 +2043,7 @@ def process_incidents(incidents, *, source: str = 'caddo'):
                 low_quality = (existing_source in (None, "fallback", "skipped", "unresolved")) or (existing_quality in (None, "fallback", "city-only", "cross-only", "unknown-location", "unresolved"))
                 stale_version = existing_version != GEOCODER_VERSION
                 if (needs_geo or low_quality or stale_version) and (incident.get('street') or incident.get('cross_streets')):
-                    geo = geocode_address(
-                        incident.get('street'),
-                        incident.get('cross_streets'),
-                        incident.get('municipality'),
-                        source=incident_source,
-                    )
+                    geo = _incident_geocode_result(incident, incident_source)
                     if geo:
                         new_has_coords = geo.get('lat') is not None and geo.get('lng') is not None
                         provider_confirmed = new_has_coords or bool(geo.get('provider_responded'))
@@ -1815,19 +2086,15 @@ def process_incidents(incidents, *, source: str = 'caddo'):
                 pass
         else:
             # New incident - geocode and insert
-            geo = geocode_address(
-                incident['street'],
-                incident['cross_streets'],
-                incident['municipality'],
-                source=incident_source,
-            )
+            geo = _incident_geocode_result(incident, incident_source)
+            first_seen = occurred_at or now
             try:
                 cursor.execute('''
                     INSERT OR IGNORE INTO incidents 
-                    (hash, agency, time, units, description, street, cross_streets, municipality, source,
+                    (hash, agency, time, units, description, street, cross_streets, municipality, source, is_active,
                      latitude, longitude, first_seen, last_seen,
                      geocode_source, geocode_quality, geocode_query, geocoded_at, geocode_version)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     h,
                     incident['agency'],
@@ -1838,9 +2105,10 @@ def process_incidents(incidents, *, source: str = 'caddo'):
                     incident['cross_streets'],
                     incident['municipality'],
                     incident_source,
+                    desired_active,
                     geo['lat'],
                     geo['lng'],
-                    now,
+                    first_seen,
                     now,
                     geo.get('source'),
                     geo.get('quality'),
@@ -1853,8 +2121,8 @@ def process_incidents(incidents, *, source: str = 'caddo'):
                 try:
                     cursor.execute('''
                         INSERT OR IGNORE INTO incidents 
-                        (hash, agency, time, units, description, street, cross_streets, municipality, source, latitude, longitude, first_seen, last_seen)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (hash, agency, time, units, description, street, cross_streets, municipality, source, is_active, latitude, longitude, first_seen, last_seen)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         h,
                         incident['agency'],
@@ -1865,16 +2133,17 @@ def process_incidents(incidents, *, source: str = 'caddo'):
                         incident['cross_streets'],
                         incident['municipality'],
                         incident_source,
+                        desired_active,
                         geo['lat'],
                         geo['lng'],
-                        now,
+                        first_seen,
                         now
                     ))
                 except sqlite3.OperationalError:
                     cursor.execute('''
                         INSERT OR IGNORE INTO incidents 
-                        (hash, agency, time, units, description, street, cross_streets, municipality, latitude, longitude, first_seen, last_seen)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (hash, agency, time, units, description, street, cross_streets, municipality, latitude, longitude, first_seen, last_seen, is_active)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         h,
                         incident['agency'],
@@ -1886,10 +2155,12 @@ def process_incidents(incidents, *, source: str = 'caddo'):
                         incident['municipality'],
                         geo['lat'],
                         geo['lng'],
+                        first_seen,
                         now,
-                        now
+                        desired_active,
                     ))
-            log(f"New incident: {incident['description']} at {incident['street'] or incident['cross_streets']}")
+            if incident_source != 'neworleans':
+                log(f"New incident: {incident['description']} at {incident['street'] or incident['cross_streets']}")
 
     # Mark incidents no longer in feed as inactive (source-scoped).
     if not has_source_column:
@@ -1939,14 +2210,25 @@ def background_scrape():
         ('caddo', 'Caddo 911', scrape_caddo_incidents),
         ('batonrouge', 'Baton Rouge Traffic', scrape_batonrouge_incidents),
         ('lafayette', 'Lafayette 911 (beta)', scrape_lafayette_incidents),
+        ('neworleans', 'New Orleans daily calls for service', scrape_neworleans_incidents),
     ]
     for source_name, label, scraper in source_jobs:
+        min_interval = SOURCE_MIN_SCRAPE_INTERVAL_SECONDS.get(source_name, 0)
+        previous_run = source_last_scrape_monotonic.get(source_name)
+        monotonic_now = time.monotonic()
+        if previous_run is not None and monotonic_now - previous_run < min_interval:
+            continue
+        source_last_scrape_monotonic[source_name] = monotonic_now
         log(f"[{datetime.now().strftime('%H:%M:%S')}] Scraping {label}...")
         incidents, refreshed_at_text = scraper()
         _store_feed_refresh(source_name, refreshed_at_text)
         if incidents:
             process_incidents(incidents, source=source_name)
-            log(f"[{datetime.now().strftime('%H:%M:%S')}] Processed {len(incidents)} active incidents from {source_name}")
+            active_count = sum(1 for incident in incidents if incident.get('is_active', True))
+            log(
+                f"[{datetime.now().strftime('%H:%M:%S')}] Processed {len(incidents)} "
+                f"incidents ({active_count} latest) from {source_name}"
+            )
         else:
             log(f"[{datetime.now().strftime('%H:%M:%S')}] No incidents found or scraping failed for {source_name}")
 
@@ -1954,7 +2236,7 @@ def background_scrape():
     meta_set('last_scrape_finished_at', last_scrape_finished_at)
 
 
-VALID_SOURCES = {'caddo', 'lafayette', 'batonrouge'}
+VALID_SOURCES = {'caddo', 'lafayette', 'batonrouge', 'neworleans'}
 
 
 def _normalize_source_filter(value: str | None) -> str:
@@ -2444,8 +2726,8 @@ REPORT_MAP_ADDRESS_RE = re.compile(
     r"^\s*\d{1,6}[A-Za-z]?\s+[A-Za-z0-9 .#'/-]{2,},?\s+[A-Za-z .'-]{2,},?\s+(?:LA|Louisiana)\s+\d{5}(?:-\d{4})?\s*$",
     re.IGNORECASE,
 )
-REPORT_MAP_EXACT_SCORE_LIMIT = int(os.environ.get('CADDO911_REPORT_EXACT_SCORE_LIMIT', '12000'))
-REPORT_MAP_PERIOD_CACHE_TTL_SECONDS = int(os.environ.get('CADDO911_REPORT_PERIOD_CACHE_TTL_SECONDS', '120'))
+REPORT_MAP_EXACT_SCORE_LIMIT = int(_env_setting('LOUISIANA911_REPORT_EXACT_SCORE_LIMIT', 'CADDO911_REPORT_EXACT_SCORE_LIMIT', '12000'))
+REPORT_MAP_PERIOD_CACHE_TTL_SECONDS = int(_env_setting('LOUISIANA911_REPORT_PERIOD_CACHE_TTL_SECONDS', 'CADDO911_REPORT_PERIOD_CACHE_TTL_SECONDS', '120'))
 _report_geocode_cache: dict[tuple[str, str], dict | None] = {}
 _report_period_cache: dict[tuple[str, str, tuple[str, ...]], tuple[float, dict]] = {}
 _available_report_months_cache: dict[tuple[str, tuple[str, ...]], tuple[float, list[str]]] = {}
@@ -2988,6 +3270,11 @@ def _serialize_map_report_incident(incident: dict) -> dict:
 @app.route('/')
 def index():
     return send_from_directory('public', 'index.html')
+
+@app.route('/about')
+@app.route('/about/')
+def about():
+    return send_from_directory('public', 'about.html')
 
 @app.route('/reports')
 @app.route('/reports/')
@@ -3557,6 +3844,7 @@ def get_status():
         'feed_refreshed_at_caddo',
         'feed_refreshed_at_lafayette',
         'feed_refreshed_at_batonrouge',
+        'feed_refreshed_at_neworleans',
         'last_scrape_started_at',
         'last_scrape_finished_at',
         'scrape_interval_seconds',
@@ -3574,12 +3862,13 @@ def get_status():
         'caddo': meta.get('feed_refreshed_at_caddo') or feed_refreshed_by_source.get('caddo'),
         'lafayette': meta.get('feed_refreshed_at_lafayette') or feed_refreshed_by_source.get('lafayette'),
         'batonrouge': meta.get('feed_refreshed_at_batonrouge') or feed_refreshed_by_source.get('batonrouge'),
+        'neworleans': meta.get('feed_refreshed_at_neworleans') or feed_refreshed_by_source.get('neworleans'),
     }
 
     return jsonify({
         # lastUpdate: UTC ISO timestamp of when we last processed/saved a scrape
         'lastUpdate': meta.get('last_update') or last_update,
-        # feedRefreshedAt: the website's own "Refreshed at: ..." text (local to Caddo911)
+        # feedRefreshedAt: backwards-compatible Caddo source refresh text.
         'feedRefreshedAt': meta.get('feed_refreshed_at') or feed_refreshed_at,
         'feedRefreshedBySource': refreshed_by_source,
         'lastScrapeStartedAt': meta.get('last_scrape_started_at') or last_scrape_started_at,
@@ -3598,7 +3887,7 @@ def get_status():
 def force_refresh():
     try:
         # Disabled by default for safety; enable explicitly if you really need it.
-        enabled = os.environ.get('CADDO911_ENABLE_REFRESH_ENDPOINT', '0').strip().lower() in ('1', 'true', 'yes')
+        enabled = _env_setting('LOUISIANA911_ENABLE_REFRESH_ENDPOINT', 'CADDO911_ENABLE_REFRESH_ENDPOINT', '0').strip().lower() in ('1', 'true', 'yes')
         if not enabled:
             return jsonify({'error': 'refresh endpoint disabled'}), 403
 
@@ -3702,7 +3991,7 @@ def start_collector(
             coalesce=True,
             id='archive_job',
         )
-        log(f"[CADDO 911] Daily archive scheduled for 3:00 AM Central")
+        log(f"[LOUISIANA 911] Daily archive scheduled for 3:00 AM Central")
 
     # Weekly snapshot backup - Sunday night (Central)
     if enable_weekly_backup:
@@ -3716,14 +4005,14 @@ def start_collector(
             coalesce=True,
             id='weekly_backup_job',
         )
-        log("[CADDO 911] Weekly backup scheduled for Sundays at 11:30 PM Central")
+        log("[LOUISIANA 911] Weekly backup scheduled for Sundays at 11:30 PM Central")
     
     scheduler.start()
     return scheduler
 
 def run_webserver(*, host: str = '0.0.0.0', port: int = 3911) -> None:
     """Run the Flask web UI server (blocking)."""
-    log(f"[CADDO 911] Web UI running at http://localhost:{port}")
+    log(f"[LOUISIANA 911] Web UI running at http://localhost:{port}")
     log("            Press Ctrl+C to stop")
     app.run(host=host, port=port, debug=False, use_reloader=False)
 
@@ -3771,7 +4060,7 @@ def run_interactive_mode(
     )
     web_thread: Thread | None = None
 
-    log("[CADDO 911] Event gather mode is running (collector only).")
+    log("[LOUISIANA 911] Event gather mode is running (collector only).")
     log("          Press '2' to start the web UI, 'q' to quit.")
 
     try:
@@ -3781,11 +4070,11 @@ def run_interactive_mode(
                 key = key.strip().lower()
                 if key == '2':
                     if web_thread is None or not web_thread.is_alive():
-                        log("[CADDO 911] Starting web UI...")
+                        log("[LOUISIANA 911] Starting web UI...")
                         web_thread = Thread(target=run_webserver, kwargs={'host': host, 'port': port}, daemon=True)
                         web_thread.start()
                     else:
-                        log("[CADDO 911] Web UI already running.")
+                        log("[LOUISIANA 911] Web UI already running.")
                 elif key in ('q',):
                     break
             time.sleep(0.1)
@@ -3796,7 +4085,7 @@ def run_interactive_mode(
             scheduler.shutdown(wait=False)
         except Exception:
             pass
-        log("[CADDO 911] Collector stopped.")
+        log("[LOUISIANA 911] Collector stopped.")
 
 def run_gather_mode(
     *,
@@ -3811,7 +4100,7 @@ def run_gather_mode(
         enable_archive=enable_archive,
         enable_weekly_backup=enable_weekly_backup,
     )
-    log("[CADDO 911] Collector-only mode running. Press Ctrl+C to stop.")
+    log("[LOUISIANA 911] Collector-only mode running. Press Ctrl+C to stop.")
     try:
         while True:
             time.sleep(1)
@@ -3822,7 +4111,7 @@ def run_gather_mode(
             scheduler.shutdown(wait=False)
         except Exception:
             pass
-        log("[CADDO 911] Collector stopped.")
+        log("[LOUISIANA 911] Collector stopped.")
 
 def run_regeocode(*, dry_run: bool = False, limit: int | None = None) -> None:
     """
@@ -3871,13 +4160,21 @@ def run_regeocode(*, dry_run: bool = False, limit: int | None = None) -> None:
             continue
         
         try:
-            # Get new geocode
-            geo = geocode_address(
-                street,
-                cross_streets,
-                municipality,
-                source=row_dict.get('source') or 'caddo',
-            )
+            # Get new geocode. New Orleans needs the same public block-mask,
+            # intersection, and Approx Loc handling used during normal imports.
+            row_source = _normalize_source_name(row_dict.get('source') or 'caddo')
+            if row_source == 'neworleans':
+                nola_probe = dict(row_dict)
+                nola_probe['latitude'] = None
+                nola_probe['longitude'] = None
+                geo = _incident_geocode_result(nola_probe, row_source)
+            else:
+                geo = geocode_address(
+                    street,
+                    cross_streets,
+                    municipality,
+                    source=row_source,
+                )
             new_lat = geo.get('lat')
             new_lng = geo.get('lng')
             new_source = geo.get('source')
@@ -3966,7 +4263,7 @@ def run_backup(*, include_archives: bool = True) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Caddo 911 Live Feed")
+    parser = argparse.ArgumentParser(description="Louisiana 911 public incident monitor")
     parser.add_argument("--mode", choices=["serve", "gather", "interactive"], default="serve",
                         help="serve: collector + web UI (default); gather: collector only; interactive: collector only, press 2 to start UI")
     parser.add_argument("--host", default="0.0.0.0")
@@ -4040,7 +4337,7 @@ def main() -> None:
             scheduler.shutdown(wait=False)
         except Exception:
             pass
-        log("[CADDO 911] Shutting down.")
+        log("[LOUISIANA 911] Shutting down.")
 
 if __name__ == '__main__':
     main()

@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 _IMPORT_DB_PATH = os.path.join(
     tempfile.gettempdir(), f"caddo911-geocoding-tests-{os.getpid()}.db"
@@ -468,6 +469,177 @@ class GeocodingTests(unittest.TestCase):
                 ).fetchone()
                 conn.close()
                 self.assertEqual(1, row["units"])
+        finally:
+            app.DB_PATH = original_db_path
+
+    def test_new_orleans_zero_point_uses_public_block_location(self):
+        incident = {
+            "source": "neworleans",
+            "source_id": "G0000126",
+            "agency": "NOPD",
+            "time": "1200",
+            "units": 0,
+            "description": "DISTURBANCE (OTHER)",
+            "street": "035XX General De Gaulle Dr",
+            "cross_streets": "",
+            "municipality": "New Orleans",
+            "latitude": 29.9511,
+            "longitude": -90.0715,
+            "coordinates_published": True,
+            "occurred_at": "2026-07-17T17:00:00+00:00",
+            "is_active": True,
+        }
+
+        original_db_path = app.DB_PATH
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                app.DB_PATH = os.path.join(tmp_dir, "louisiana911.db")
+                app.init_db()
+                app.process_incidents([dict(incident)], source="neworleans")
+
+                zero_point = dict(incident)
+                zero_point.update({
+                    "description": "MEDICAL",
+                    "latitude": None,
+                    "longitude": None,
+                    "coordinates_published": False,
+                })
+                with patch.object(app, "geocode_address", return_value={
+                    "lat": 29.9234,
+                    "lng": -90.0123,
+                    "source": "arcgis",
+                    "quality": "address",
+                    "query": "3500 General De Gaulle Dr, New Orleans, LA",
+                    "provider_responded": True,
+                }) as geocode_mock:
+                    app.process_incidents([zero_point], source="neworleans")
+                    geocode_mock.assert_called_once_with(
+                        "3500 General De Gaulle Dr",
+                        None,
+                        "New Orleans",
+                        source="neworleans",
+                    )
+
+                # A normal refresh should reuse the validated approximation
+                # instead of making the same provider request every 15 minutes.
+                with patch.object(
+                    app,
+                    "geocode_address",
+                    side_effect=AssertionError("cached approximation should be reused"),
+                ) as cached_geocode_mock:
+                    app.process_incidents([zero_point], source="neworleans")
+                    cached_geocode_mock.assert_not_called()
+
+                conn = app.db_connect(row_factory=True)
+                row = conn.execute(
+                    "SELECT description, latitude, longitude, geocode_source, geocode_quality "
+                    "FROM incidents WHERE hash = ?",
+                    (app.hash_incident(incident),),
+                ).fetchone()
+                conn.close()
+
+                self.assertEqual("MEDICAL", row["description"])
+                self.assertAlmostEqual(29.9234, row["latitude"])
+                self.assertAlmostEqual(-90.0123, row["longitude"])
+                self.assertEqual("arcgis", row["geocode_source"])
+                self.assertEqual("approximate-address", row["geocode_quality"])
+        finally:
+            app.DB_PATH = original_db_path
+
+    def test_new_orleans_public_intersection_is_split_for_fallback_geocoding(self):
+        incident = {
+            "street": "French St & Vicksburg St",
+            "cross_streets": "",
+            "municipality": "New Orleans",
+            "latitude": None,
+            "longitude": None,
+        }
+        with patch.object(app, "geocode_address", return_value={
+            "lat": 30.0027,
+            "lng": -90.1070,
+            "source": "arcgis",
+            "quality": "street+cross",
+            "query": "French St & Vicksburg St, New Orleans, LA",
+            "provider_responded": True,
+        }) as geocode_mock:
+            result = app._incident_geocode_result(incident, "neworleans")
+
+        geocode_mock.assert_called_once_with(
+            "French St",
+            "Vicksburg St",
+            "New Orleans",
+            source="neworleans",
+        )
+        self.assertEqual("approximate-street+cross", result["quality"])
+        self.assertEqual(
+            "Approximate from public NOPD block/intersection label",
+            result["query"],
+        )
+
+    def test_new_orleans_public_block_notation_is_normalized_only_for_geocoding(self):
+        street, cross, explicitly_approximate = app._new_orleans_public_location_parts({
+            "street": "091XX Blk Belfast St",
+            "cross_streets": "",
+        })
+        self.assertEqual("9100 Belfast St", street)
+        self.assertIsNone(cross)
+        self.assertFalse(explicitly_approximate)
+
+        street, cross, _ = app._new_orleans_public_location_parts({
+            "street": "046XX Chef Mentuer Hwy",
+            "cross_streets": "",
+        })
+        self.assertEqual("4600 Chef Menteur Hwy", street)
+        self.assertIsNone(cross)
+
+        street, cross, _ = app._new_orleans_public_location_parts({
+            "street": "US90B E After Earhart Onramp",
+            "cross_streets": "",
+        })
+        self.assertEqual("US 90 BUS E", street)
+        self.assertEqual("Earhart Blvd", cross)
+
+    def test_new_orleans_unusable_public_label_clears_stale_point(self):
+        incident = {
+            "source": "neworleans",
+            "source_id": "G0000226",
+            "agency": "NOPD",
+            "time": "1200",
+            "units": 0,
+            "description": "SENSITIVE CALL TYPE",
+            "street": "REDACTED BLOCK",
+            "cross_streets": "",
+            "municipality": "New Orleans",
+            "latitude": 29.9511,
+            "longitude": -90.0715,
+            "occurred_at": "2026-07-17T17:00:00+00:00",
+            "is_active": True,
+        }
+
+        original_db_path = app.DB_PATH
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                app.DB_PATH = os.path.join(tmp_dir, "louisiana911.db")
+                app.init_db()
+                app.process_incidents([dict(incident)], source="neworleans")
+
+                unavailable = dict(incident)
+                unavailable["latitude"] = None
+                unavailable["longitude"] = None
+                app.process_incidents([unavailable], source="neworleans")
+
+                conn = app.db_connect(row_factory=True)
+                row = conn.execute(
+                    "SELECT latitude, longitude, geocode_source, geocode_quality "
+                    "FROM incidents WHERE hash = ?",
+                    (app.hash_incident(incident),),
+                ).fetchone()
+                conn.close()
+
+                self.assertIsNone(row["latitude"])
+                self.assertIsNone(row["longitude"])
+                self.assertEqual("source-feed-unmapped", row["geocode_source"])
+                self.assertEqual("location-unavailable", row["geocode_quality"])
         finally:
             app.DB_PATH = original_db_path
 
