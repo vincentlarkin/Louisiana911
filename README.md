@@ -73,7 +73,7 @@ python app.py --mode gather --quiet
 #### Maintenance commands
 
 ```bash
-# re-geocode all incidents (improves old coordinates)
+# re-geocode all incidents with the current validation algorithm
 python app.py --regeocode
 
 # archive old incidents to monthly DBs
@@ -116,7 +116,7 @@ This repo also includes wiki pages in `wiki/`:
 
 1. **Scraping**: Uses source adapters in `sources/` (`caddo` + `batonrouge` + `lafayette`) to fetch and normalize incidents into one shared data shape.
 2. **Deduplication**: Each incident gets a source-aware hash based on source, agency, time, description, and location.
-3. **Geocoding**: Cross streets are prioritized over street names for more accurate intersection placement. Uses ArcGIS first and falls back to OpenStreetMap's Nominatim.
+3. **Geocoding**: Validates actual road intersections from ArcGIS provider metadata. Two cross streets are treated as endpoints bracketing the named street, and their midpoint is used when both endpoints validate. Unverified provider guesses are not mapped.
 4. **Storage**: Incidents stored in `caddo911.db` (SQLite) with source, timestamps, and active/inactive status.
 5. **Archiving**: Inactive incidents older than `CADDO911_ARCHIVE_DAYS` move to `caddo911_archive_YYYY_MM.db`.
 6. **Backup snapshots**: Weekly SQLite-consistent snapshots are written to `backups/` (configurable).
@@ -163,7 +163,7 @@ This app currently ingests from:
 
 ## Tips
 
-- **Geocoding improves over time**: The app stores geocode metadata and can re-geocode low-quality points automatically as new scrapes arrive (no DB wipe required).
+- **Geocoding improves over time**: The app stores a geocoder version with each result. Active rows made by an older algorithm are re-checked automatically (no DB wipe required); use `python app.py --regeocode` to refresh inactive rows in the main database.
 - **Choose source scope**: Use `All`, `Caddo`, `Baton Rouge`, or `Lafayette (Beta)` to control which feed is visible.
 - **Filter incidents**: Use filter buttons to focus on agency types and urgency/severity.
 - **Historical view**: Switch to "History" tab and select a date to browse past incidents
