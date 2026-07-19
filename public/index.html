@@ -18,7 +18,7 @@
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/images/louisiana911-icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="/images/louisiana911-icon-192.png">
-  <link rel="manifest" href="/manifest.webmanifest?v=4.1.2">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.1.4">
   <meta name="theme-color" content="#0a0a0f">
   <meta name="color-scheme" content="dark">
   <meta name="application-name" content="Louisiana911">
@@ -58,6 +58,10 @@
           "height": 512
         },
         "description": "A citizen-run public emergency incident transparency project for Louisiana.",
+        "sameAs": [
+          "https://github.com/vincentlarkin/Louisiana911",
+          "https://vincentlarkin.com"
+        ],
         "founder": {
           "@type": "Person",
           "name": "Vincent Larkin",
@@ -83,7 +87,7 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.1.2" />
+  <link rel="stylesheet" href="styles.css?v=4.1.4" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -156,7 +160,7 @@
       <button class="modal-close" type="button" aria-label="Close" id="info-close">×</button>
       <div class="info-content">
         <div class="info-hero">
-          <img src="images/louisiana911-mark.png" alt="Louisiana911 logo" class="info-logo">
+          <img src="images/louisiana911-mark.png" alt="Louisiana911 logo" class="info-logo" loading="lazy" decoding="async">
           <div class="info-brand-copy">
             <h3>Louisiana<span>911</span></h3>
             <p style="margin-bottom: 6px;">Public emergency incident feeds from communities across Louisiana.</p>
@@ -175,15 +179,15 @@
             <summary>Parish Feed Links</summary>
             <div class="info-dropdown-links">
               <a href="https://ias.ecc.caddo911.com/All_ActiveEvents.aspx" target="_blank" class="info-link" rel="noopener noreferrer">
-                <img src="images/caddo911.png" alt="Caddo 911 Emergency Communications Center" class="info-link-icon">
+                <img src="images/caddo911.png" alt="Caddo 911 Emergency Communications Center" class="info-link-icon" loading="lazy" decoding="async">
                 Caddo Parish Feed
               </a>
               <a href="https://city.brla.gov/traffic/incidents.asp" target="_blank" class="info-link" rel="noopener noreferrer">
-                <img src="https://city.brla.gov/favicon.ico" alt="City of Baton Rouge favicon" class="info-link-icon">
+                <img src="https://city.brla.gov/favicon.ico" alt="City of Baton Rouge favicon" class="info-link-icon" loading="lazy" decoding="async">
                 Baton Rouge Traffic Feed
               </a>
               <a href="https://lafayette911.org/traffic/" target="_blank" class="info-link" rel="noopener noreferrer">
-                <img src="images/lafayette-police.png" alt="Lafayette Parish Communication District traffic feed" class="info-link-icon">
+                <img src="images/lafayette-police.png" alt="Lafayette Parish Communication District traffic feed" class="info-link-icon" loading="lazy" decoding="async">
                 Lafayette Parish Feed
               </a>
               <a href="https://data.nola.gov/Public-Safety-and-Preparedness/Calls-for-Service-2026/es9j-6y5d" target="_blank" class="info-link" rel="noopener noreferrer">
@@ -192,7 +196,7 @@
               </a>
             </div>
           </details>
-          <a href="https://github.com/vincentlarkin/Caddo911-Monitor" target="_blank" class="info-link" rel="noopener noreferrer">
+          <a href="https://github.com/vincentlarkin/Louisiana911" target="_blank" class="info-link" rel="noopener noreferrer">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
             GitHub
           </a>
@@ -214,7 +218,7 @@
           </a>
         </div>
         <p class="info-credit">Made by <a class="info-credit-link" href="mailto:vincent@vincentlarkin.com">Vincent Larkin</a></p>
-        <p class="info-version">v4.1.2</p>
+        <p class="info-version">v4.1.4</p>
       </div>
     </div>
   </div>
@@ -316,16 +320,16 @@
           <div class="filter-group agency-group agency-group-caddo hidden" data-filter-type="agency-caddo">
             <button class="filter-btn active" type="button" data-filter="all" title="All Caddo units">All</button>
             <button class="filter-btn" type="button" data-filter="cadfd" title="Caddo Fire/EMS">
-              <img src="images/cfd-fire.png" alt="CAD-FD/EMS" class="filter-logo">
+              <img src="images/cfd-fire.png" alt="CAD-FD/EMS" class="filter-logo" loading="lazy" decoding="async">
             </button>
             <button class="filter-btn" type="button" data-filter="shvfd" title="Shreveport Fire">
-              <img src="images/sfd-fire.png" alt="SHVFD" class="filter-logo">
+              <img src="images/sfd-fire.png" alt="SHVFD" class="filter-logo" loading="lazy" decoding="async">
             </button>
             <button class="filter-btn" type="button" data-filter="police" title="Shreveport Police">
-              <img src="images/spd-police.png" alt="Shreveport Police" class="filter-logo">
+              <img src="images/spd-police.png" alt="Shreveport Police" class="filter-logo" loading="lazy" decoding="async">
             </button>
             <button class="filter-btn" type="button" data-filter="sheriff" title="Caddo Sheriff">
-              <img src="images/cso-sheriff.png" alt="Caddo Sheriff" class="filter-logo">
+              <img src="images/cso-sheriff.png" alt="Caddo Sheriff" class="filter-logo" loading="lazy" decoding="async">
             </button>
           </div>
 
@@ -340,13 +344,13 @@
           <div class="filter-group agency-group agency-group-lafayette hidden" data-filter-type="agency-lafayette">
             <button class="filter-btn active" type="button" data-laf-unit="all" title="All Lafayette units">All</button>
             <button class="filter-btn" type="button" data-laf-unit="police" title="Lafayette Police">
-              <img src="images/lafayette-police.png" alt="Lafayette Police" class="filter-logo">
+              <img src="images/lafayette-police.png" alt="Lafayette Police" class="filter-logo" loading="lazy" decoding="async">
             </button>
             <button class="filter-btn" type="button" data-laf-unit="sheriff" title="Lafayette Sheriff">
-              <img src="images/lafayette-sheriff.png" alt="Lafayette Sheriff" class="filter-logo">
+              <img src="images/lafayette-sheriff.png" alt="Lafayette Sheriff" class="filter-logo" loading="lazy" decoding="async">
             </button>
             <button class="filter-btn" type="button" data-laf-unit="fire" title="Lafayette Fire">
-              <img src="images/lafayette-fire.png" alt="Lafayette Fire" class="filter-logo">
+              <img src="images/lafayette-fire.png" alt="Lafayette Fire" class="filter-logo" loading="lazy" decoding="async">
             </button>
           </div>
           <!-- Urgency/Severity filters -->
@@ -422,6 +426,12 @@
   
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
+    const storedViewMode = localStorage.getItem('louisiana911ViewMode') || localStorage.getItem('caddo911ViewMode');
+    const firstVisitMobileView = window.matchMedia('(max-width: 720px)').matches ? 'list' : 'map';
+    let viewMode = storedViewMode === 'list' || storedViewMode === 'map'
+      ? storedViewMode
+      : firstVisitMobileView;
+
     // Initialize map centered on Louisiana.
     const map = L.map('map', {
       zoomControl: false,
@@ -466,19 +476,24 @@
     map.getPane('unitPulse').style.pointerEvents = 'none';
 
     // The interface has a single dark basemap so the incident colors stay consistent.
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
+    const baseTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
       pane: 'base',
       attribution: '&copy; OpenStreetMap &copy; CARTO',
       subdomains: 'abcd',
       maxZoom: 19
-    }).addTo(map);
+    });
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
+    const labelTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
       pane: 'labels',
       subdomains: 'abcd',
       maxZoom: 19,
       opacity: 1
-    }).addTo(map);
+    });
+
+    function ensureMapTilesLoaded() {
+      if (!map.hasLayer(baseTileLayer)) baseTileLayer.addTo(map);
+      if (!map.hasLayer(labelTileLayer)) labelTileLayer.addTo(map);
+    }
 
     let parishOutlineLayer = null;
 
@@ -796,11 +811,6 @@
     let currentUrgencyFilter = 'all';  // Urgency/severity filter
     let currentSort = 'recent'; // 'recent' | 'urgency'
     let mapMode = 'live'; // 'live' | 'history'
-    const storedViewMode = localStorage.getItem('louisiana911ViewMode') || localStorage.getItem('caddo911ViewMode');
-    const firstVisitMobileView = window.matchMedia('(max-width: 720px)').matches ? 'list' : 'map';
-    let viewMode = storedViewMode === 'list' || storedViewMode === 'map'
-      ? storedViewMode
-      : firstVisitMobileView;
     let historyPage = 1;
     const historyPageSize = 35;
     let historyTotal = 0;
@@ -3143,6 +3153,8 @@
       } else {
         document.body.classList.remove('mobile-incidents-open');
       }
+      ensureMapTilesLoaded();
+      loadParishOutline();
       requestAnimationFrame(() => {
         map.invalidateSize();
       });
@@ -3200,7 +3212,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.1.2', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.1.4', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
@@ -3217,7 +3229,6 @@
     let pollIntervalMs = 60000;
 
     // Initial load
-    loadParishOutline();
     updateIncidents();
     updateStatus();
     setInterval(updateNewOrleansDelayBanner, 60000);
