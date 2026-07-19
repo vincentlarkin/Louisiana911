@@ -102,6 +102,27 @@ jobs:
             test ! -d "$LIVE_REPO_DIR/.git" && echo "Verified: no .git in live repo"
             echo "Deploy complete at $(date -Is)"
 
+      - name: Notify search engines via IndexNow
+        continue-on-error: true
+        run: |
+          curl --fail-with-body --retry 3 --retry-delay 2 \
+            --header 'Content-Type: application/json; charset=utf-8' \
+            --data @- \
+            'https://api.indexnow.org/indexnow' <<'JSON'
+          {
+            "host": "louisiana911.com",
+            "key": "8c88ff3574d43eedfc084b1f6733a571",
+            "keyLocation": "https://louisiana911.com/8c88ff3574d43eedfc084b1f6733a571.txt",
+            "urlList": [
+              "https://louisiana911.com/",
+              "https://louisiana911.com/caddo911/",
+              "https://louisiana911.com/about/",
+              "https://louisiana911.com/reports/",
+              "https://louisiana911.com/reports/monthly/"
+            ]
+          }
+          JSON
+
       - name: Notify on failure
         if: failure()
         run: |

@@ -651,6 +651,42 @@ REPORT_RATE_WINDOW_SECONDS = int(_env_setting('LOUISIANA911_REPORT_RATE_WINDOW_S
 _report_rate_lock = Lock()
 _report_rate_hits: dict[tuple[str, str], list[float]] = {}
 
+CANONICAL_SITE_HOST = 'louisiana911.com'
+
+
+def _first_forwarded_header_value(value: str) -> str:
+    """Return the first proxy-provided value from a comma-separated header."""
+    return (value or '').split(',', 1)[0].strip()
+
+
+@app.before_request
+def _canonical_origin_redirect():
+    """Keep public traffic on the single HTTPS, apex-domain canonical origin."""
+    forwarded_host = _first_forwarded_header_value(
+        request.headers.get('X-Forwarded-Host', '')
+    )
+    public_host = (forwarded_host or request.host).split(':', 1)[0].lower()
+    if public_host not in {CANONICAL_SITE_HOST, f'www.{CANONICAL_SITE_HOST}'}:
+        return None
+
+    forwarded_proto = _first_forwarded_header_value(
+        request.headers.get('X-Forwarded-Proto', '')
+    ).lower()
+    cloudflare_visitor = request.headers.get('CF-Visitor', '').lower()
+    uses_plain_http = (
+        forwarded_proto == 'http'
+        or ('"scheme":"http"' in cloudflare_visitor.replace(' ', ''))
+    )
+    if public_host == f'www.{CANONICAL_SITE_HOST}' or uses_plain_http:
+        path_and_query = request.full_path
+        if path_and_query.endswith('?'):
+            path_and_query = path_and_query[:-1]
+        return redirect(
+            f'https://{CANONICAL_SITE_HOST}{path_and_query}',
+            code=301,
+        )
+    return None
+
 def _unauthorized():
     resp = jsonify({'error': 'unauthorized'})
     resp.status_code = 401

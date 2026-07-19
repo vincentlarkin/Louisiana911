@@ -106,7 +106,7 @@ Automatic schedules:
 
 ### Self-hosting (NAS / Docker)
 
-See the GitHub wiki page: [Self-hosting](https://github.com/vincentlarkin/Caddo911-Monitor/wiki/Self-hosting)
+See the GitHub wiki page: [Self-hosting](https://github.com/vincentlarkin/Louisiana911/wiki/Self-hosting)
 
 ## Wiki (in-repo)
 
