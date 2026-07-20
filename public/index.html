@@ -19,7 +19,7 @@
   <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
   <link rel="icon" href="/favicon-96x96.png" sizes="96x96" type="image/png">
   <link rel="apple-touch-icon" href="/images/louisiana911-icon-192.png" sizes="192x192">
-  <link rel="manifest" href="/manifest.webmanifest?v=4.2.4">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.2.5">
   <meta name="theme-color" content="#0a0a0f">
   <meta name="color-scheme" content="dark">
   <meta name="application-name" content="Louisiana911">
@@ -88,7 +88,7 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.2.4" />
+  <link rel="stylesheet" href="styles.css?v=4.2.5" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -223,7 +223,7 @@
           </a>
         </div>
         <p class="info-credit">Made by <a class="info-credit-link" href="mailto:vincent@vincentlarkin.com">Vincent Larkin</a></p>
-        <p class="info-version">v4.2.4</p>
+        <p class="info-version">v4.2.5</p>
       </div>
     </div>
   </div>
@@ -2581,6 +2581,8 @@
     let historyRequestNoticeHideTimer = null;
     let historyRequestNoticeDeadline = 0;
     let historyRequestNoticeDuration = 10;
+    const historyDayCache = new Map();
+    const historyBatchSize = 2000;
 
     function hideHistoryRequestNotice() {
       if (historyRequestNoticeTimer) clearInterval(historyRequestNoticeTimer);
@@ -2637,12 +2639,15 @@
       return 10;
     }
 
-    async function fetchHistoryApi(url) {
+    async function fetchHistoryApi(url, { retrySession = true, showLimitNotice = true } = {}) {
       const response = await fetch(url, {
         credentials: 'same-origin',
         headers: { 'X-Louisiana911-UI': 'history' },
       });
-      if (response.status === 429) {
+      if (response.status === 404 && retrySession) {
+        return fetchHistoryApi(url, { retrySession: false, showLimitNotice });
+      }
+      if (response.status === 429 && showLimitNotice) {
         showHistoryRequestNotice(await getHistoryRetrySeconds(response));
       }
       return response;
@@ -2652,54 +2657,51 @@
 
     async function loadHistory(date) {
       try {
-        const offset = (historyPage - 1) * historyPageSize;
-        const params = new URLSearchParams();
-        params.set('source', currentSource);
-        if (date) params.set('date', date);
-        params.set('limit', String(historyPageSize));
-        params.set('offset', String(offset));
-        const pageUrl = `api/incidents/history?${params.toString()}`;
-        const response = await fetchHistoryApi(pageUrl);
-        if (response.status === 429) return;
-        if (!response.ok) throw new Error(`History request failed: ${response.status}`);
-        const data = await response.json();
+        const source = currentSource;
+        const cacheKey = `${source}:${date || ''}`;
+        const cached = historyDayCache.get(cacheKey);
+        const maxCacheAge = date === isoToday ? 30000 : 300000;
+        let incidents;
+        let total;
 
-        let incidents = Array.isArray(data.incidents) ? data.incidents : [];
-        let total = Number(data.total || 0);
-        incidents.forEach((incident) => {
-          incident.source = normalizeSource(incident?.source);
-        });
-
-        // If we need all incidents (for urgency sort OR for showing all on map), fetch them
-        const needAllIncidents = currentSort === 'urgency' || showAllHistoryOnMap;
-        if (needAllIncidents && total > incidents.length) {
-          const fullParams = new URLSearchParams();
-          fullParams.set('source', currentSource);
-          if (date) fullParams.set('date', date);
-          fullParams.set('limit', String(total));
-          fullParams.set('offset', '0');
-          const fullUrl = `api/incidents/history?${fullParams.toString()}`;
-          const fullResponse = await fetchHistoryApi(fullUrl);
-          if (fullResponse.ok) {
-            const fullData = await fullResponse.json();
-            incidents = Array.isArray(fullData.incidents) ? fullData.incidents : incidents;
-            incidents.forEach((incident) => {
+        if (cached && Date.now() - cached.fetchedAt < maxCacheAge) {
+          incidents = cached.incidents;
+          total = cached.total;
+        } else {
+          incidents = [];
+          total = 0;
+          do {
+            const params = new URLSearchParams();
+            params.set('source', source);
+            if (date) params.set('date', date);
+            params.set('limit', String(historyBatchSize));
+            params.set('offset', String(incidents.length));
+            const response = await fetchHistoryApi(`api/incidents/history?${params.toString()}`);
+            if (response.status === 429) return;
+            if (!response.ok) throw new Error(`History request failed: ${response.status}`);
+            const data = await response.json();
+            const batch = Array.isArray(data.incidents) ? data.incidents : [];
+            batch.forEach((incident) => {
               incident.source = normalizeSource(incident?.source);
             });
-            total = Number(fullData.total || total);
-          } else if (fullResponse.status !== 429) {
-            throw new Error(`History request failed: ${fullResponse.status}`);
+            incidents.push(...batch);
+            total = Number(data.total || incidents.length);
+            if (!batch.length) break;
+          } while (incidents.length < total);
+
+          historyDayCache.set(cacheKey, { incidents, total, fetchedAt: Date.now() });
+          while (historyDayCache.size > 6) {
+            historyDayCache.delete(historyDayCache.keys().next().value);
           }
         }
+
+        if (source !== currentSource || date !== historySelectedDate) return;
         historyHasAllIncidents = incidents.length >= total;
 
         currentHistoryIncidents = incidents;
         historyTotal = total;
         
-        // Store all incidents for the day (used when showAllHistoryOnMap is enabled)
-        if (showAllHistoryOnMap) {
-          allHistoryIncidentsForDay = incidents;
-        }
+        allHistoryIncidentsForDay = incidents;
         
         // Only update shared filter visibility from History when the History tab is visible.
         const historyPanel = document.getElementById('history-panel');
@@ -2878,8 +2880,10 @@
 
       try {
         const month = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
-        const response = await fetchHistoryApi(`api/incidents/history_counts?month=${month}&source=${encodeURIComponent(currentSource)}`);
-        if (response.status === 429) return;
+        const response = await fetchHistoryApi(
+          `api/incidents/history_counts?month=${month}&source=${encodeURIComponent(currentSource)}`,
+          { showLimitNotice: false }
+        );
         if (!response.ok) throw new Error(`History counts request failed: ${response.status}`);
         const data = await response.json();
         const counts = data && typeof data === 'object' ? (data.counts || {}) : {};
@@ -3324,7 +3328,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.2.4', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.2.5', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
