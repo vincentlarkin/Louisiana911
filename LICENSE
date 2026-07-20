@@ -1,4 +1,4 @@
-CADDO 911 LIVE FEED - PROPRIETARY LICENSE
+LOUISIANA911 PUBLIC INCIDENT MONITOR - PROPRIETARY LICENSE
 
 Copyright (c) 2026 Vincent Larkin. All Rights Reserved.
 
@@ -11,7 +11,7 @@ TERMS AND CONDITIONS
    Any use, copy, modification, or distribution of this Software must retain
    the following attribution:
 
-   "Caddo 911 Live Feed - Created by Vincent Larkin"
+   "Louisiana911 Public Incident Monitor - Created by Vincent Larkin"
 
    Public forks, public deployments, and public distributions must also keep
    a working link to the original creator, either:
@@ -38,9 +38,10 @@ TERMS AND CONDITIONS
    written authorization from Vincent Larkin.
 
 4. NO TRADEMARK OR ENDORSEMENT RIGHTS
-   This license does not grant any rights to use "Caddo 911", "Caddo Parish",
-   or other names/logos/marks of third parties beyond describing the public
-   data source. You may not imply endorsement or official affiliation.
+   This license does not grant any rights to use "Louisiana911" or the names,
+   logos, or marks of participating agencies, jurisdictions, and other third
+   parties beyond describing public data sources. You may not imply endorsement
+   or official affiliation.
 
 5. NO WARRANTY
    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
@@ -54,9 +55,9 @@ TERMS AND CONDITIONS
    OTHER DEALINGS IN THE SOFTWARE.
 
 7. DATA DISCLAIMER
-   This Software displays publicly available data from Caddo Parish 911
-   Communications District. The author makes no claims of ownership over
-   the underlying emergency dispatch data.
+   This Software displays publicly available incident information from
+   participating Louisiana sources. The author makes no claims of ownership
+   over the underlying public-safety or emergency dispatch data.
 
 8. TERMINATION
    Any violation of these terms automatically terminates your license to use
