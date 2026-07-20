@@ -97,9 +97,9 @@ class CanonicalOriginTests(unittest.TestCase):
 
     def test_versioned_shell_assets_are_immutable(self):
         for path in (
-            '/styles.css?v=4.2.1',
-            '/service-worker.js?v=4.2.1',
-            '/manifest.webmanifest?v=4.2.1',
+            '/styles.css?v=4.2.2',
+            '/service-worker.js?v=4.2.2',
+            '/manifest.webmanifest?v=4.2.2',
         ):
             with self.subTest(path=path):
                 response = self.client.get(path, headers={'Host': 'localhost'})
@@ -114,6 +114,16 @@ class CanonicalOriginTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertNotIn('immutable', response.headers.get('Cache-Control', ''))
+
+    def test_map_markers_include_mobile_tap_target_and_incident_dialog(self):
+        response = self.client.get('/', headers={'Host': 'localhost'})
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(200, response.status_code)
+        self.assertIn("const hitTarget = L.circleMarker", html)
+        self.assertIn("radius: shouldUseMobileIncidentDialog() ? 18 : 10", html)
+        self.assertIn("openIncidentDialog(activeIncident", html)
+        self.assertIn("const marker = L.featureGroup([triangle, hitTarget])", html)
 
 
 if __name__ == '__main__':
