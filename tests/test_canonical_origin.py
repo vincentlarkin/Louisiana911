@@ -21,6 +21,9 @@ def tearDownModule():
 class CanonicalOriginTests(unittest.TestCase):
     def setUp(self):
         self.client = app.app.test_client()
+        with app._report_rate_lock:
+            app._report_rate_hits.clear()
+            app._history_date_rate_hits.clear()
 
     def test_proxy_http_redirects_to_https_apex_and_preserves_query(self):
         response = self.client.get(
@@ -98,9 +101,9 @@ class CanonicalOriginTests(unittest.TestCase):
 
     def test_versioned_shell_assets_are_immutable(self):
         for path in (
-            '/styles.css?v=4.2.4',
-            '/service-worker.js?v=4.2.4',
-            '/manifest.webmanifest?v=4.2.4',
+            '/styles.css?v=4.2.5',
+            '/service-worker.js?v=4.2.5',
+            '/manifest.webmanifest?v=4.2.5',
         ):
             with self.subTest(path=path):
                 response = self.client.get(path, headers={'Host': 'localhost'})
@@ -135,6 +138,52 @@ class CanonicalOriginTests(unittest.TestCase):
         self.assertIn("if (response.status === 429)", html)
         self.assertIn("response.headers.get('Retry-After')", html)
         self.assertIn('showHistoryRequestNotice(await getHistoryRetrySeconds(response))', html)
+        self.assertIn('response.status === 404 && retrySession', html)
+
+    def test_history_limit_counts_distinct_days_not_calendar_requests(self):
+        headers = {
+            'Host': 'localhost',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Mode': 'cors',
+            'User-Agent': 'Distinct History Day Test',
+            'X-Louisiana911-UI': 'history',
+        }
+        self.client.get(
+            '/',
+            headers={
+                **headers,
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Dest': 'document',
+            },
+        )
+
+        with patch.object(app, 'INCIDENT_HISTORY_API_RATE_LIMIT', 2):
+            for month in ('2026-05', '2026-06', '2026-07'):
+                counts = self.client.get(
+                    f'/api/incidents/history_counts?month={month}',
+                    headers=headers,
+                )
+                self.assertEqual(200, counts.status_code)
+
+            for _ in range(4):
+                repeated = self.client.get(
+                    '/api/incidents/history?date=2026-07-18',
+                    headers=headers,
+                )
+                self.assertEqual(200, repeated.status_code)
+
+            second_day = self.client.get(
+                '/api/incidents/history?date=2026-07-19',
+                headers=headers,
+            )
+            third_day = self.client.get(
+                '/api/incidents/history?date=2026-07-20',
+                headers=headers,
+            )
+
+        self.assertEqual(200, second_day.status_code)
+        self.assertEqual(429, third_day.status_code)
 
     def test_approximate_locations_use_concise_copy(self):
         response = self.client.get('/', headers={'Host': 'localhost'})
@@ -237,14 +286,6 @@ class CanonicalOriginTests(unittest.TestCase):
             '/api/incidents/history?date=2026-07-20',
             headers=headers,
         )
-        changed_browser = self.client.get(
-            '/api/incidents/history?date=2026-07-20',
-            headers={
-                **headers,
-                'User-Agent': 'Different Browser',
-                'X-Louisiana911-UI': 'history',
-            },
-        )
         permitted = self.client.get(
             '/api/incidents/history?date=2026-07-20',
             headers={**headers, 'X-Louisiana911-UI': 'history'},
@@ -252,6 +293,14 @@ class CanonicalOriginTests(unittest.TestCase):
         counts = self.client.get(
             '/api/incidents/history_counts?month=2026-07',
             headers={**headers, 'X-Louisiana911-UI': 'history'},
+        )
+        changed_browser = self.client.get(
+            '/api/incidents/history?date=2026-07-20',
+            headers={
+                **headers,
+                'User-Agent': 'Different Browser',
+                'X-Louisiana911-UI': 'history',
+            },
         )
 
         self.assertEqual(404, missing_ui_header.status_code)
@@ -286,8 +335,13 @@ class CanonicalOriginTests(unittest.TestCase):
                 '/api/incidents/history?date=2026-07-20',
                 headers=headers,
             )
+            renewed = self.client.get(
+                '/api/incidents/history?date=2026-07-20',
+                headers=headers,
+            )
 
         self.assertEqual(404, expired.status_code)
+        self.assertEqual(200, renewed.status_code)
 
 
 if __name__ == '__main__':
