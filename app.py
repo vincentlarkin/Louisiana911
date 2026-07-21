@@ -8,6 +8,9 @@ be an emergency service or a replacement for calling 911.
 
 import sqlite3
 import hashlib
+import base64
+import hmac
+import secrets
 import time
 import argparse
 import os
@@ -645,12 +648,29 @@ AUTH_PASS = _env_setting('LOUISIANA911_AUTH_PASS', 'CADDO911_AUTH_PASS') or None
 REPORT_PAGE_RATE_LIMIT = int(_env_setting('LOUISIANA911_REPORT_PAGE_RATE_LIMIT', 'CADDO911_REPORT_PAGE_RATE_LIMIT', '120'))
 REPORT_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_REPORT_API_RATE_LIMIT', 'CADDO911_REPORT_API_RATE_LIMIT', '90'))
 INCIDENT_ACTIVE_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_ACTIVE_API_RATE_LIMIT', 'CADDO911_ACTIVE_API_RATE_LIMIT', '120'))
-INCIDENT_HISTORY_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_HISTORY_API_RATE_LIMIT', 'CADDO911_HISTORY_API_RATE_LIMIT', '45'))
+INCIDENT_HISTORY_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_HISTORY_API_RATE_LIMIT', 'CADDO911_HISTORY_API_RATE_LIMIT', '10'))
 INCIDENT_OTHER_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_OTHER_API_RATE_LIMIT', 'CADDO911_OTHER_API_RATE_LIMIT', '90'))
-INCIDENT_HISTORY_MAX_LIMIT = int(_env_setting('LOUISIANA911_HISTORY_MAX_LIMIT', 'CADDO911_HISTORY_MAX_LIMIT', '1000'))
+INCIDENT_HISTORY_MAX_LIMIT = int(_env_setting('LOUISIANA911_HISTORY_MAX_LIMIT', 'CADDO911_HISTORY_MAX_LIMIT', '2000'))
 REPORT_RATE_WINDOW_SECONDS = int(_env_setting('LOUISIANA911_REPORT_RATE_WINDOW_SECONDS', 'CADDO911_REPORT_RATE_WINDOW_SECONDS', '60'))
+HISTORY_UI_SESSION_MAX_AGE_SECONDS = int(_env_setting(
+    'LOUISIANA911_HISTORY_UI_SESSION_MAX_AGE_SECONDS',
+    'CADDO911_HISTORY_UI_SESSION_MAX_AGE_SECONDS',
+    '43200',
+))
+_history_ui_secret_setting = _env_setting(
+    'LOUISIANA911_HISTORY_UI_SECRET',
+    'CADDO911_HISTORY_UI_SECRET',
+).strip()
+HISTORY_UI_SECRET = (
+    _history_ui_secret_setting.encode('utf-8')
+    if _history_ui_secret_setting
+    else secrets.token_bytes(32)
+)
+HISTORY_UI_COOKIE_NAME = 'l911_history_ui'
+HISTORY_UI_REQUEST_HEADER = 'X-Louisiana911-UI'
 _report_rate_lock = Lock()
 _report_rate_hits: dict[tuple[str, str], list[float]] = {}
+_history_date_rate_hits: dict[str, dict[str, float]] = {}
 
 CANONICAL_SITE_HOST = 'louisiana911.com'
 
@@ -708,6 +728,94 @@ def _check_auth() -> bool:
     return bool(auth) and auth.username == AUTH_USER and auth.password == AUTH_PASS
 
 
+def _history_ui_user_agent_digest() -> str:
+    user_agent = request.headers.get('User-Agent', '')
+    return hashlib.sha256(user_agent.encode('utf-8')).hexdigest()[:20]
+
+
+def _history_ui_signature(payload: str) -> str:
+    digest = hmac.new(HISTORY_UI_SECRET, payload.encode('utf-8'), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).decode('ascii').rstrip('=')
+
+
+def _new_history_ui_token() -> str:
+    issued_at = int(time.time())
+    nonce = secrets.token_urlsafe(18)
+    payload = f'v1:{issued_at}:{nonce}:{_history_ui_user_agent_digest()}'
+    return f'{payload}:{_history_ui_signature(payload)}'
+
+
+def _valid_history_ui_token(token: str | None) -> bool:
+    if not token or HISTORY_UI_SESSION_MAX_AGE_SECONDS <= 0:
+        return False
+    try:
+        version, issued_raw, nonce, user_agent_digest, signature = token.split(':', 4)
+        issued_at = int(issued_raw)
+    except (TypeError, ValueError):
+        return False
+
+    now = int(time.time())
+    if version != 'v1' or not nonce or issued_at > now + 60:
+        return False
+    if now - issued_at > HISTORY_UI_SESSION_MAX_AGE_SECONDS:
+        return False
+    if not hmac.compare_digest(user_agent_digest, _history_ui_user_agent_digest()):
+        return False
+
+    payload = f'{version}:{issued_raw}:{nonce}:{user_agent_digest}'
+    return hmac.compare_digest(signature, _history_ui_signature(payload))
+
+
+def _history_ui_request_guard():
+    if request.headers.get(HISTORY_UI_REQUEST_HEADER, '').strip() != 'history':
+        return jsonify({'error': 'not_found'}), 404
+    if not _valid_history_ui_token(request.cookies.get(HISTORY_UI_COOKIE_NAME)):
+        response = jsonify({'error': 'not_found'})
+        response.status_code = 404
+        _set_history_ui_cookie(response)
+        return response
+    return None
+
+
+def _request_uses_https() -> bool:
+    forwarded_proto = _first_forwarded_header_value(
+        request.headers.get('X-Forwarded-Proto', '')
+    ).lower()
+    return request.is_secure or forwarded_proto == 'https'
+
+
+def _is_ui_document_navigation() -> bool:
+    fetch_site = request.headers.get('Sec-Fetch-Site', '').strip().lower()
+    fetch_mode = request.headers.get('Sec-Fetch-Mode', '').strip().lower()
+    fetch_dest = request.headers.get('Sec-Fetch-Dest', '').strip().lower()
+    return (
+        fetch_site in {'none', 'same-origin'}
+        and fetch_mode == 'navigate'
+        and fetch_dest == 'document'
+    )
+
+
+def _set_history_ui_cookie(response):
+    response.set_cookie(
+        HISTORY_UI_COOKIE_NAME,
+        _new_history_ui_token(),
+        max_age=max(1, HISTORY_UI_SESSION_MAX_AGE_SECONDS),
+        secure=_request_uses_https(),
+        httponly=True,
+        samesite='Strict',
+        path='/api/incidents',
+    )
+    return response
+
+
+def _serve_index_with_history_ui_session():
+    response = send_from_directory('public', 'index.html')
+    if _is_ui_document_navigation():
+        _set_history_ui_cookie(response)
+    response.headers['Cache-Control'] = 'no-store, private'
+    return response
+
+
 def _client_ip_for_rate_limit() -> str:
     forwarded_for = request.headers.get('X-Forwarded-For', '')
     if forwarded_for:
@@ -719,8 +827,8 @@ def _report_rate_bucket(path: str) -> tuple[str, int] | None:
     clean_path = path.rstrip('/') or '/'
     if clean_path == '/api/incidents/active':
         return 'incident-active-api', INCIDENT_ACTIVE_API_RATE_LIMIT
-    if clean_path in {'/api/incidents/history', '/api/incidents/history_counts'}:
-        return 'incident-history-api', INCIDENT_HISTORY_API_RATE_LIMIT
+    if clean_path == '/api/incidents/history_counts':
+        return 'incident-history-counts-api', INCIDENT_OTHER_API_RATE_LIMIT
     if clean_path.startswith('/api/reports/'):
         return 'report-api', REPORT_API_RATE_LIMIT
     if clean_path.startswith('/api/'):
@@ -743,6 +851,33 @@ def _rate_limited_response(retry_after_seconds: int):
 
 def _check_report_rate_limit():
     if REPORT_RATE_WINDOW_SECONDS <= 0:
+        return None
+
+    clean_path = request.path.rstrip('/') or '/'
+    if clean_path == '/api/incidents/history':
+        date = (request.args.get('date') or '').strip()
+        if not date or INCIDENT_HISTORY_API_RATE_LIMIT <= 0:
+            return None
+
+        now = time.monotonic()
+        cutoff = now - REPORT_RATE_WINDOW_SECONDS
+        client_ip = _client_ip_for_rate_limit()
+        with _report_rate_lock:
+            dates = {
+                stored_date: stamp
+                for stored_date, stamp in _history_date_rate_hits.get(client_ip, {}).items()
+                if stamp > cutoff
+            }
+            if date in dates:
+                _history_date_rate_hits[client_ip] = dates
+                return None
+            if len(dates) >= INCIDENT_HISTORY_API_RATE_LIMIT:
+                oldest = min(dates.values()) if dates else now
+                retry_after = max(1, int(math.ceil(REPORT_RATE_WINDOW_SECONDS - (now - oldest))))
+                _history_date_rate_hits[client_ip] = dates
+                return _rate_limited_response(retry_after)
+            dates[date] = now
+            _history_date_rate_hits[client_ip] = dates
         return None
 
     bucket = _report_rate_bucket(request.path)
@@ -816,6 +951,13 @@ def _auth_middleware():
         return api_guard
     if not _check_auth():
         return _unauthorized()
+    if (request.path.rstrip('/') or '/') in {
+        '/api/incidents/history',
+        '/api/incidents/history_counts',
+    }:
+        history_guard = _history_ui_request_guard()
+        if history_guard is not None:
+            return history_guard
     limited = _check_report_rate_limit()
     if limited is not None:
         return limited
@@ -3543,7 +3685,12 @@ def _serialize_map_report_incident(incident: dict) -> dict:
 # API Routes
 @app.route('/')
 def index():
-    return send_from_directory('public', 'index.html')
+    return _serve_index_with_history_ui_session()
+
+
+@app.route('/index.html')
+def index_html():
+    return _serve_index_with_history_ui_session()
 
 @app.route('/about/')
 def about():
@@ -3652,6 +3799,10 @@ def get_active_incidents():
 
 @app.route('/api/incidents/history')
 def get_history():
+    ui_guard = _history_ui_request_guard()
+    if ui_guard is not None:
+        return ui_guard
+
     requested_limit = request.args.get('limit', 100, type=int)
     requested_offset = request.args.get('offset', 0, type=int)
     limit = max(1, min(requested_limit or 100, max(1, INCIDENT_HISTORY_MAX_LIMIT)))
@@ -3814,6 +3965,10 @@ def get_history():
 
 @app.route('/api/incidents/history_counts')
 def get_history_counts():
+    ui_guard = _history_ui_request_guard()
+    if ui_guard is not None:
+        return ui_guard
+
     month = request.args.get('month')  # YYYY-MM format
     source_filter = _normalize_source_filter(request.args.get('source'))
 

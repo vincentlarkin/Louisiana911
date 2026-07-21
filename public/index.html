@@ -19,7 +19,7 @@
   <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
   <link rel="icon" href="/favicon-96x96.png" sizes="96x96" type="image/png">
   <link rel="apple-touch-icon" href="/images/louisiana911-icon-192.png" sizes="192x192">
-  <link rel="manifest" href="/manifest.webmanifest?v=4.2.3">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.2.6">
   <meta name="theme-color" content="#0a0a0f">
   <meta name="color-scheme" content="dark">
   <meta name="application-name" content="Louisiana911">
@@ -88,7 +88,7 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.2.3" />
+  <link rel="stylesheet" href="styles.css?v=4.2.6" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -223,7 +223,7 @@
           </a>
         </div>
         <p class="info-credit">Made by <a class="info-credit-link" href="mailto:vincent@vincentlarkin.com">Vincent Larkin</a></p>
-        <p class="info-version">v4.2.3</p>
+        <p class="info-version">v4.2.6</p>
       </div>
     </div>
   </div>
@@ -241,6 +241,23 @@
         <button class="incident-modal-btn secondary hidden" id="incident-modal-list-btn" type="button">Go to incident in list</button>
         <button class="incident-modal-btn primary" id="incident-modal-dismiss" type="button">Dismiss</button>
       </div>
+    </div>
+  </div>
+
+  <div class="history-request-notice" id="history-request-notice" role="status" aria-live="polite" aria-atomic="true" aria-hidden="true">
+    <div class="history-request-notice-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="8.5"></circle>
+        <path d="M12 7.5v5l3.25 2"></path>
+      </svg>
+    </div>
+    <div class="history-request-notice-copy">
+      <strong>History paused briefly</strong>
+      <span id="history-request-notice-text">Please wait a moment, then try that date again.</span>
+    </div>
+    <button class="history-request-notice-close" id="history-request-notice-close" type="button" aria-label="Dismiss notice">×</button>
+    <div class="history-request-notice-track" aria-hidden="true">
+      <span id="history-request-notice-progress"></span>
     </div>
   </div>
   
@@ -1551,18 +1568,8 @@
         /^\s*approx(?:imate)?\s+loc(?:ation)?\s*:/i.test(street);
     }
 
-    function approximateLocationExplanation(incident) {
-      const source = normalizeSource(incident?.source);
-      const geocodeSource = String(incident?.geocode_source || '').toLowerCase();
-      if (source === 'batonrouge') {
-        return geocodeSource === 'source-feed'
-          ? 'Approximate point published by the City-Parish traffic map.'
-          : 'Approximate placement derived from the public Baton Rouge address or cross-street range.';
-      }
-      if (source === 'neworleans') {
-        return 'Approximate placement derived from the block or intersection published by NOPD.';
-      }
-      return 'Approximate placement derived from the public source location.';
+    function approximateLocationExplanation() {
+      return 'Approximate Location';
     }
 
     const MAP_COORDINATE_BOUNDS = {
@@ -1666,7 +1673,7 @@
         <div class="popup-content sev-${sev}">
           <div class="popup-title">${escapeHtml(incident.description || 'Incident')}</div>
           <div class="popup-detail"><span class="popup-label">Location</span>${escapeHtml(locationStr)}</div>
-          ${approximate ? '<div class="popup-detail"><span class="popup-label">Map</span><span class="location-accuracy-note">Approximate placement from the published location</span></div>' : ''}
+          ${approximate ? '<div class="popup-detail"><span class="popup-label">Map</span><span class="location-accuracy-note">Approximate Location</span></div>' : ''}
           <div class="popup-detail"><span class="popup-label">Time</span>${escapeHtml(formatTime(incident.time))}</div>
           <div class="popup-detail"><span class="popup-label">Agency</span>${escapeHtml(agencyDisplay)} &bull; ${escapeHtml(unitLabel)}</div>
           <div class="popup-detail"><span class="popup-label">Severity</span>${escapeHtml(sev.toUpperCase())}</div>
@@ -1871,7 +1878,7 @@
           </div>
           <div class="incident-location">
             <span>${escapeHtml(locationText)}</span>
-            ${approximate ? '<span class="location-accuracy-note">Approximate map placement</span>' : ''}
+            ${approximate ? '<span class="location-accuracy-note">Approximate Location</span>' : ''}
           </div>
           <div class="incident-meta">
             <span class="incident-agency ${sevClass}" title="Severity: ${sev.toUpperCase()}">${escapeHtml(agencyDisplay)}</span>
@@ -2569,50 +2576,135 @@
     }
 
     // Load history
+    const historyRequestNotice = document.getElementById('history-request-notice');
+    const historyRequestNoticeText = document.getElementById('history-request-notice-text');
+    const historyRequestNoticeProgress = document.getElementById('history-request-notice-progress');
+    const historyRequestNoticeClose = document.getElementById('history-request-notice-close');
+    let historyRequestNoticeTimer = null;
+    let historyRequestNoticeHideTimer = null;
+    let historyRequestNoticeDeadline = 0;
+    let historyRequestNoticeDuration = 10;
+    const historyDayCache = new Map();
+    const historyBatchSize = 2000;
+
+    function hideHistoryRequestNotice() {
+      if (historyRequestNoticeTimer) clearInterval(historyRequestNoticeTimer);
+      if (historyRequestNoticeHideTimer) clearTimeout(historyRequestNoticeHideTimer);
+      historyRequestNoticeTimer = null;
+      historyRequestNoticeHideTimer = null;
+      historyRequestNotice.classList.remove('open');
+      historyRequestNotice.setAttribute('aria-hidden', 'true');
+    }
+
+    function updateHistoryRequestNotice() {
+      const secondsLeft = Math.max(0, Math.ceil((historyRequestNoticeDeadline - Date.now()) / 1000));
+      const unit = secondsLeft === 1 ? 'second' : 'seconds';
+      historyRequestNoticeText.textContent = secondsLeft > 0
+        ? `Please wait ${secondsLeft} ${unit}, then try that date again.`
+        : 'You can try that date again now.';
+      historyRequestNoticeProgress.style.transform = `scaleX(${Math.min(1, secondsLeft / historyRequestNoticeDuration)})`;
+      if (secondsLeft <= 0) {
+        if (historyRequestNoticeTimer) clearInterval(historyRequestNoticeTimer);
+        historyRequestNoticeTimer = null;
+        historyRequestNoticeHideTimer = setTimeout(hideHistoryRequestNotice, 900);
+      }
+    }
+
+    function showHistoryRequestNotice(retrySeconds = 10) {
+      const safeSeconds = Math.min(300, Math.max(1, Math.ceil(Number(retrySeconds) || 10)));
+      historyRequestNoticeDeadline = Math.max(historyRequestNoticeDeadline, Date.now() + safeSeconds * 1000);
+      historyRequestNoticeDuration = Math.max(1, Math.ceil((historyRequestNoticeDeadline - Date.now()) / 1000));
+      historyRequestNotice.classList.add('open');
+      historyRequestNotice.setAttribute('aria-hidden', 'false');
+      if (historyRequestNoticeTimer) clearInterval(historyRequestNoticeTimer);
+      if (historyRequestNoticeHideTimer) clearTimeout(historyRequestNoticeHideTimer);
+      historyRequestNoticeHideTimer = null;
+      updateHistoryRequestNotice();
+      if (historyRequestNoticeDeadline > Date.now()) {
+        historyRequestNoticeTimer = setInterval(updateHistoryRequestNotice, 250);
+      }
+    }
+
+    async function getHistoryRetrySeconds(response) {
+      const retryAfter = response.headers.get('Retry-After');
+      if (retryAfter) {
+        const numericSeconds = Number(retryAfter);
+        if (Number.isFinite(numericSeconds)) return numericSeconds;
+        const retryAt = Date.parse(retryAfter);
+        if (Number.isFinite(retryAt)) return Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
+      }
+      try {
+        const data = await response.clone().json();
+        if (Number.isFinite(Number(data?.retryAfterSeconds))) return Number(data.retryAfterSeconds);
+      } catch (_) {
+        // Cloudflare responses may be HTML rather than JSON.
+      }
+      return 10;
+    }
+
+    async function fetchHistoryApi(url, { retrySession = true, showLimitNotice = true } = {}) {
+      const response = await fetch(url, {
+        credentials: 'same-origin',
+        headers: { 'X-Louisiana911-UI': 'history' },
+      });
+      if (response.status === 404 && retrySession) {
+        return fetchHistoryApi(url, { retrySession: false, showLimitNotice });
+      }
+      if (response.status === 429 && showLimitNotice) {
+        showHistoryRequestNotice(await getHistoryRetrySeconds(response));
+      }
+      return response;
+    }
+
+    historyRequestNoticeClose?.addEventListener('click', hideHistoryRequestNotice);
+
     async function loadHistory(date) {
       try {
-        const offset = (historyPage - 1) * historyPageSize;
-        const params = new URLSearchParams();
-        params.set('source', currentSource);
-        if (date) params.set('date', date);
-        params.set('limit', String(historyPageSize));
-        params.set('offset', String(offset));
-        const pageUrl = `api/incidents/history?${params.toString()}`;
-        const response = await fetch(pageUrl);
-        const data = await response.json();
+        const source = currentSource;
+        const cacheKey = `${source}:${date || ''}`;
+        const cached = historyDayCache.get(cacheKey);
+        const maxCacheAge = date === isoToday ? 30000 : 300000;
+        let incidents;
+        let total;
 
-        let incidents = Array.isArray(data.incidents) ? data.incidents : [];
-        let total = Number(data.total || 0);
-        incidents.forEach((incident) => {
-          incident.source = normalizeSource(incident?.source);
-        });
+        if (cached && Date.now() - cached.fetchedAt < maxCacheAge) {
+          incidents = cached.incidents;
+          total = cached.total;
+        } else {
+          incidents = [];
+          total = 0;
+          do {
+            const params = new URLSearchParams();
+            params.set('source', source);
+            if (date) params.set('date', date);
+            params.set('limit', String(historyBatchSize));
+            params.set('offset', String(incidents.length));
+            const response = await fetchHistoryApi(`api/incidents/history?${params.toString()}`);
+            if (response.status === 429) return;
+            if (!response.ok) throw new Error(`History request failed: ${response.status}`);
+            const data = await response.json();
+            const batch = Array.isArray(data.incidents) ? data.incidents : [];
+            batch.forEach((incident) => {
+              incident.source = normalizeSource(incident?.source);
+            });
+            incidents.push(...batch);
+            total = Number(data.total || incidents.length);
+            if (!batch.length) break;
+          } while (incidents.length < total);
 
-        // If we need all incidents (for urgency sort OR for showing all on map), fetch them
-        const needAllIncidents = currentSort === 'urgency' || showAllHistoryOnMap;
-        if (needAllIncidents && total > incidents.length) {
-          const fullParams = new URLSearchParams();
-          fullParams.set('source', currentSource);
-          if (date) fullParams.set('date', date);
-          fullParams.set('limit', String(total));
-          fullParams.set('offset', '0');
-          const fullUrl = `api/incidents/history?${fullParams.toString()}`;
-          const fullResponse = await fetch(fullUrl);
-          const fullData = await fullResponse.json();
-          incidents = Array.isArray(fullData.incidents) ? fullData.incidents : incidents;
-          incidents.forEach((incident) => {
-            incident.source = normalizeSource(incident?.source);
-          });
-          total = Number(fullData.total || total);
+          historyDayCache.set(cacheKey, { incidents, total, fetchedAt: Date.now() });
+          while (historyDayCache.size > 6) {
+            historyDayCache.delete(historyDayCache.keys().next().value);
+          }
         }
+
+        if (source !== currentSource || date !== historySelectedDate) return;
         historyHasAllIncidents = incidents.length >= total;
 
         currentHistoryIncidents = incidents;
         historyTotal = total;
         
-        // Store all incidents for the day (used when showAllHistoryOnMap is enabled)
-        if (showAllHistoryOnMap) {
-          allHistoryIncidentsForDay = incidents;
-        }
+        allHistoryIncidentsForDay = incidents;
         
         // Only update shared filter visibility from History when the History tab is visible.
         const historyPanel = document.getElementById('history-panel');
@@ -2791,7 +2883,10 @@
 
       try {
         const month = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
-        const response = await fetch(`api/incidents/history_counts?month=${month}&source=${encodeURIComponent(currentSource)}`);
+        const response = await fetchHistoryApi(
+          `api/incidents/history_counts?month=${month}&source=${encodeURIComponent(currentSource)}`,
+          { showLimitNotice: false }
+        );
         if (!response.ok) throw new Error(`History counts request failed: ${response.status}`);
         const data = await response.json();
         const counts = data && typeof data === 'object' ? (data.counts || {}) : {};
@@ -3236,7 +3331,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.2.3', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.2.6', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
