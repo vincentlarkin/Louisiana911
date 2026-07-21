@@ -97,9 +97,9 @@ class CanonicalOriginTests(unittest.TestCase):
 
     def test_versioned_shell_assets_are_immutable(self):
         for path in (
-            '/styles.css?v=4.2.2',
-            '/service-worker.js?v=4.2.2',
-            '/manifest.webmanifest?v=4.2.2',
+            '/styles.css?v=4.2.3',
+            '/service-worker.js?v=4.2.3',
+            '/manifest.webmanifest?v=4.2.3',
         ):
             with self.subTest(path=path):
                 response = self.client.get(path, headers={'Host': 'localhost'})
@@ -120,8 +120,9 @@ class CanonicalOriginTests(unittest.TestCase):
         html = response.get_data(as_text=True)
 
         self.assertEqual(200, response.status_code)
-        self.assertIn("const hitTarget = L.circleMarker", html)
-        self.assertIn("radius: shouldUseMobileIncidentDialog() ? 18 : 10", html)
+        self.assertIn("const hitTarget = L.polygon(points", html)
+        self.assertIn("weight: shouldUseMobileIncidentDialog() ? 36 : 20", html)
+        self.assertIn("fillOpacity: 0.001", html)
         self.assertIn("openIncidentDialog(activeIncident", html)
         self.assertIn("const marker = L.featureGroup([triangle, hitTarget])", html)
 
