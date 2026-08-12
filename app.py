@@ -975,6 +975,7 @@ def _security_headers(resp):
     # be reused without a validation round trip. Every deploy changes the
     # version query string before these files change.
     versioned_shell_assets = {
+        '/analytics.js',
         '/styles.css',
         '/service-worker.js',
         '/manifest.webmanifest',

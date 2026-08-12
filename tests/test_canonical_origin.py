@@ -101,6 +101,7 @@ class CanonicalOriginTests(unittest.TestCase):
 
     def test_versioned_shell_assets_are_immutable(self):
         for path in (
+            '/analytics.js?v=4.3.0',
             '/styles.css?v=4.2.6',
             '/service-worker.js?v=4.2.6',
             '/manifest.webmanifest?v=4.2.6',
@@ -118,6 +119,45 @@ class CanonicalOriginTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertNotIn('immutable', response.headers.get('Cache-Control', ''))
+
+    def test_every_public_page_uses_shared_deferred_analytics(self):
+        for path in (
+            '/',
+            '/about/',
+            '/caddo911/',
+            '/coverage/',
+            '/coverage/baton-rouge/',
+            '/coverage/lafayette/',
+            '/coverage/new-orleans/',
+            '/reports/',
+            '/reports/monthly/',
+        ):
+            with self.subTest(path=path):
+                response = self.client.get(path, headers={'Host': 'localhost'})
+                self.assertEqual(200, response.status_code)
+                html = response.get_data(as_text=True)
+                self.assertEqual(1, html.count('/analytics.js?v=4.3.0'))
+                self.assertIn('<script defer src="/analytics.js?v=4.3.0"></script>', html)
+                self.assertNotIn('googletagmanager.com/gtag/js', html)
+
+    def test_analytics_bundle_includes_key_engagement_events(self):
+        response = self.client.get('/analytics.js?v=4.3.0', headers={'Host': 'localhost'})
+        self.assertEqual(200, response.status_code)
+        javascript = response.get_data(as_text=True)
+        for event_name in (
+            'ui_click',
+            'control_change',
+            'scroll_depth',
+            'container_scroll_depth',
+            'section_view',
+            'engagement_milestone',
+            'page_summary',
+            'page_performance',
+            'web_vital',
+            'client_error',
+        ):
+            with self.subTest(event_name=event_name):
+                self.assertIn(f"'{event_name}'", javascript)
 
     def test_map_markers_include_mobile_tap_target_and_incident_dialog(self):
         response = self.client.get('/', headers={'Host': 'localhost'})
