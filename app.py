@@ -18,11 +18,12 @@ import sys
 import math
 import re
 import json
+import html as html_module
 from urllib.parse import urlsplit
 from difflib import SequenceMatcher
 from datetime import datetime, timezone, timedelta
 from threading import Lock, Thread
-from flask import Flask, jsonify, redirect, request, send_from_directory
+from flask import Flask, abort, jsonify, redirect, request, send_from_directory
 from geopy.geocoders import Nominatim
 from apscheduler.schedulers.background import BackgroundScheduler
 from zoneinfo import ZoneInfo
@@ -810,6 +811,155 @@ def _set_history_ui_cookie(response):
 
 def _serve_index_with_history_ui_session():
     response = send_from_directory('public', 'index.html')
+    if _is_ui_document_navigation():
+        _set_history_ui_cookie(response)
+    response.headers['Cache-Control'] = 'no-store, private'
+    return response
+
+
+INCIDENT_SHARE_ID_PATTERN = re.compile(r'^[0-9a-f]{32}$')
+
+
+def _find_incident_by_share_id(share_id: str) -> dict | None:
+    """Find one incident by its stable deduplication hash, including archives."""
+    normalized = (share_id or '').strip().lower()
+    if not INCIDENT_SHARE_ID_PATTERN.fullmatch(normalized):
+        return None
+
+    database_paths = [DB_PATH, *_list_archive_dbs()]
+    seen_paths: set[str] = set()
+    for database_path in database_paths:
+        absolute_path = os.path.abspath(database_path)
+        if absolute_path in seen_paths or not os.path.exists(absolute_path):
+            continue
+        seen_paths.add(absolute_path)
+        conn = None
+        try:
+            conn = sqlite3.connect(absolute_path, timeout=10, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute('PRAGMA busy_timeout = 5000;')
+            row = conn.execute(
+                'SELECT * FROM incidents WHERE hash = ? LIMIT 1',
+                (normalized,),
+            ).fetchone()
+            if row is not None:
+                incident = dict(row)
+                incident['source'] = _normalize_incident_source_for_read(incident.get('source'))
+                return incident
+        except sqlite3.Error:
+            continue
+        finally:
+            if conn is not None:
+                conn.close()
+    return None
+
+
+def _incident_share_payload(incident: dict) -> dict:
+    """Return only fields the public incident page needs."""
+    return {
+        'id': incident.get('id'),
+        'share_id': incident.get('hash'),
+        'agency': incident.get('agency'),
+        'time': incident.get('time'),
+        'units': incident.get('units'),
+        'description': incident.get('description'),
+        'street': incident.get('street'),
+        'cross_streets': incident.get('cross_streets'),
+        'municipality': incident.get('municipality'),
+        'source': _normalize_incident_source_for_read(incident.get('source')),
+        'latitude': incident.get('latitude'),
+        'longitude': incident.get('longitude'),
+        'first_seen': incident.get('first_seen'),
+        'last_seen': incident.get('last_seen'),
+        'is_active': int(bool(incident.get('is_active'))),
+        'geocode_source': incident.get('geocode_source'),
+        'geocode_quality': incident.get('geocode_quality'),
+    }
+
+
+def _serve_shared_incident_page(incident: dict):
+    """Serve the map shell with incident-specific social metadata and data."""
+    payload = _incident_share_payload(incident)
+    share_id = str(payload['share_id']).lower()
+    share_url = f'https://{CANONICAL_SITE_HOST}/incident/{share_id}'
+    description = str(payload.get('description') or 'Public safety incident').strip()
+    location = _incident_location_label(incident) or str(payload.get('municipality') or 'Louisiana')
+    units = int(payload.get('units') or 0)
+    is_active = bool(payload.get('is_active'))
+
+    if is_active and units >= 5:
+        status_label = 'BREAKING - VERY ACTIVE'
+        summary_lead = f'Very active public incident with {units} assigned units'
+    elif is_active:
+        status_label = 'ACTIVE INCIDENT'
+        summary_lead = 'Active public incident'
+    else:
+        status_label = 'INCIDENT REPORT'
+        summary_lead = 'Historical public incident'
+
+    page_title = f'{status_label}: {description} | Louisiana911'
+    page_description = f'{summary_lead}: {description} near {location}. Public feed details may change.'
+
+    index_path = os.path.join(app.root_path, 'public', 'index.html')
+    with open(index_path, 'r', encoding='utf-8') as index_file:
+        index_html = index_file.read()
+
+    # The main shell historically uses root-relative and document-relative
+    # assets. Anchor document-relative URLs at / when it is served from the
+    # nested /incident/<id> route.
+    index_html = index_html.replace('<head>', '<head>\n  <base href="/">', 1)
+
+    escaped_title = html_module.escape(page_title, quote=True)
+    escaped_description = html_module.escape(page_description, quote=True)
+    escaped_url = html_module.escape(share_url, quote=True)
+    index_html = index_html.replace(
+        '<title>Louisiana 911 Calls &amp; Caddo 911 Live Map | Louisiana911</title>',
+        f'<title>{escaped_title}</title>',
+    )
+    index_html = index_html.replace(
+        '<meta name="description" content="View Louisiana 911 public incident feeds on one map, including live Caddo 911 calls, Baton Rouge and Lafayette traffic incidents, and daily NOPD calls.">',
+        f'<meta name="description" content="{escaped_description}">',
+    )
+    index_html = index_html.replace(
+        '<meta name="robots" content="index,follow,max-image-preview:large">',
+        '<meta name="robots" content="noindex,follow,max-image-preview:large">',
+    )
+    index_html = index_html.replace(
+        '<link rel="canonical" href="https://louisiana911.com/">',
+        f'<link rel="canonical" href="{escaped_url}">',
+    )
+    index_html = index_html.replace(
+        '<meta property="og:title" content="Louisiana 911 Calls &amp; Caddo 911 Live Map">',
+        f'<meta property="og:title" content="{escaped_title}">',
+    )
+    index_html = index_html.replace(
+        '<meta property="og:description" content="Live Caddo 911 calls, Baton Rouge and Lafayette traffic incidents, and daily NOPD calls on one public Louisiana map.">',
+        f'<meta property="og:description" content="{escaped_description}">',
+    )
+    index_html = index_html.replace(
+        '<meta property="og:url" content="https://louisiana911.com/">',
+        f'<meta property="og:url" content="{escaped_url}">',
+    )
+    index_html = index_html.replace(
+        '<meta property="og:type" content="website">',
+        '<meta property="og:type" content="article">',
+    )
+    index_html = index_html.replace(
+        '<meta name="twitter:title" content="Louisiana 911 Calls &amp; Caddo 911 Live Map">',
+        f'<meta name="twitter:title" content="{escaped_title}">',
+    )
+    index_html = index_html.replace(
+        '<meta name="twitter:description" content="Live and daily public emergency incident feeds from across Louisiana on one map.">',
+        f'<meta name="twitter:description" content="{escaped_description}">',
+    )
+    serialized_payload = json.dumps(payload, ensure_ascii=True, separators=(',', ':')).replace('<', '\\u003c')
+    index_html = index_html.replace(
+        '</head>',
+        f'  <script type="application/json" id="shared-incident-data">{serialized_payload}</script>\n</head>',
+        1,
+    )
+
+    response = app.response_class(index_html, mimetype='text/html')
     if _is_ui_document_navigation():
         _set_history_ui_cookie(response)
     response.headers['Cache-Control'] = 'no-store, private'
@@ -3694,6 +3844,15 @@ def index():
 @app.route('/index.html')
 def index_html():
     return _serve_index_with_history_ui_session()
+
+
+@app.route('/incident/<share_id>')
+def shared_incident(share_id: str):
+    incident = _find_incident_by_share_id(share_id)
+    if incident is None:
+        abort(404)
+    return _serve_shared_incident_page(incident)
+
 
 @app.route('/about/')
 def about():
