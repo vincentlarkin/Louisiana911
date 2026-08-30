@@ -12,7 +12,7 @@
   <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
   <link rel="icon" href="/favicon-96x96.png" sizes="96x96" type="image/png">
   <link rel="apple-touch-icon" href="/images/louisiana911-icon-192.png" sizes="192x192">
-  <link rel="manifest" href="/manifest.webmanifest?v=4.3.3">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.3.5">
   <meta name="theme-color" content="#0a0a0f">
   <meta name="color-scheme" content="dark">
   <meta name="application-name" content="Louisiana911">
@@ -81,7 +81,7 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.3.3" />
+  <link rel="stylesheet" href="styles.css?v=4.3.5" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -216,7 +216,7 @@
           </a>
         </div>
         <p class="info-credit">Made by <a class="info-credit-link" href="mailto:vincent@vincentlarkin.com">Vincent Larkin</a></p>
-        <p class="info-version">v4.3.3</p>
+        <p class="info-version">v4.3.5</p>
       </div>
     </div>
   </div>
@@ -257,6 +257,10 @@
   <main class="main-container">
     <div class="map-container">
       <div id="map"></div>
+      <div class="basemap-switcher" role="group" aria-label="Map detail">
+        <button class="basemap-option" type="button" data-basemap="clean" aria-pressed="true">Clean</button>
+        <button class="basemap-option" type="button" data-basemap="detailed" aria-pressed="false">Detailed</button>
+      </div>
       <div class="legend-container" id="legend-container">
         <div class="map-overlay" id="map-legend">
           <button class="legend-collapse" id="legend-collapse" type="button" aria-expanded="true" aria-label="Collapse legend" title="Collapse legend">◀</button>
@@ -458,8 +462,8 @@
       zoomAnimation: false,
       markerZoomAnimation: false
     }).setView([32.5252, -93.7502], 11);
-    const markerRenderer = L.canvas({ padding: 0.5 });
-    const medicalMarkerRenderer = L.svg({ padding: 0.5 });
+    const markerRenderer = L.canvas({ padding: 0.5, pane: 'incident' });
+    const medicalMarkerRenderer = L.svg({ padding: 0.5, pane: 'incident' });
     const unitPulseRenderer = L.svg({ padding: 0.5, pane: 'unitPulse' });
     const MEDICAL_MARKER_PATTERN_ID = 'medical-marker-stripes';
     const UNIT_PULSE_THRESHOLD = 5;
@@ -480,6 +484,10 @@
     map.getPane('labels').style.zIndex = 650;
     map.getPane('labels').style.pointerEvents = 'none';
 
+    map.createPane('incident');
+    map.getPane('incident').classList.add('leaflet-incident-pane');
+    map.getPane('incident').style.zIndex = 675;
+
     map.createPane('parish');
     map.getPane('parish').classList.add('leaflet-parish-pane');
     map.getPane('parish').style.zIndex = 500;
@@ -490,23 +498,59 @@
     map.getPane('unitPulse').style.zIndex = 575;
     map.getPane('unitPulse').style.pointerEvents = 'none';
 
-    const baseTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+    const cleanBaseTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
       pane: 'base',
       attribution: 'Tiles &copy; Esri &mdash; Sources: Esri, HERE, Garmin, &copy; OpenStreetMap contributors, and the GIS User Community',
       maxNativeZoom: 16,
       maxZoom: 19
     });
 
-    const labelTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+    const cleanLabelTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
       pane: 'labels',
       maxNativeZoom: 16,
       maxZoom: 19,
       opacity: 1
     });
 
+    const detailedTileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      pane: 'base',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19
+    });
+
+    const basemapButtons = Array.from(document.querySelectorAll('[data-basemap]'));
+    const storedBasemapMode = localStorage.getItem('louisiana911BasemapMode');
+    let basemapMode = storedBasemapMode === 'detailed' ? 'detailed' : 'clean';
+
+    function setBasemapMode(mode, { persist = true } = {}) {
+      const nextMode = mode === 'detailed' ? 'detailed' : 'clean';
+      [cleanBaseTileLayer, cleanLabelTileLayer, detailedTileLayer].forEach(layer => {
+        if (map.hasLayer(layer)) map.removeLayer(layer);
+      });
+
+      if (nextMode === 'detailed') {
+        detailedTileLayer.addTo(map);
+      } else {
+        cleanBaseTileLayer.addTo(map);
+        cleanLabelTileLayer.addTo(map);
+      }
+
+      basemapMode = nextMode;
+      map.getContainer().dataset.basemapMode = nextMode;
+      basemapButtons.forEach(button => {
+        const active = button.dataset.basemap === nextMode;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+      if (persist) localStorage.setItem('louisiana911BasemapMode', nextMode);
+    }
+
+    basemapButtons.forEach(button => {
+      button.addEventListener('click', () => setBasemapMode(button.dataset.basemap));
+    });
+
     function ensureMapTilesLoaded() {
-      if (!map.hasLayer(baseTileLayer)) baseTileLayer.addTo(map);
-      if (!map.hasLayer(labelTileLayer)) labelTileLayer.addTo(map);
+      setBasemapMode(basemapMode, { persist: false });
     }
 
     let parishOutlineLayer = null;
@@ -1526,6 +1570,40 @@
       return size;
     }
 
+    function _markerSymbolSizePixels(incident) {
+      const quality = String(incident?.geocode_quality || '').toLowerCase();
+      const source = String(incident?.geocode_source || '').toLowerCase();
+      if (isApproximateLocation(incident) || source === 'fallback' || quality === 'fallback' || quality === 'city-only') return 26;
+      if (quality === 'cross-only' || quality === 'street-only') return 22;
+      if (quality === 'street-segment' || quality === 'street+cross') return 19;
+      return 16;
+    }
+
+    function _markerSymbol(incident, severity, seed) {
+      const size = _markerSymbolSizePixels(incident);
+      const color = getSeverityColor(severity);
+      const rotation = seed % 360;
+      const approximate = isApproximateLocation(incident);
+      const patternId = `medical-symbol-${seed}`;
+      const pattern = severity === 'medical'
+        ? `<defs><pattern id="${patternId}" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)"><rect width="4" height="8" fill="#f1f3f6"></rect><rect x="4" width="4" height="8" fill="#ff3b3b"></rect></pattern></defs>`
+        : '';
+      const fill = severity === 'medical' ? `url(#${patternId})` : color;
+      const dash = approximate ? 'stroke-dasharray="4 3"' : '';
+      const html = `<svg class="incident-triangle-symbol" viewBox="0 0 28 28" aria-hidden="true" style="transform:rotate(${rotation}deg)">${pattern}<polygon points="14,2 26,25 2,25" fill="${fill}" stroke="#07090d" stroke-width="5" stroke-linejoin="round"></polygon><polygon points="14,2 26,25 2,25" fill="${fill}" stroke="${color}" stroke-width="2" stroke-linejoin="round" ${dash}></polygon></svg>`;
+      return L.marker([incident.latitude, incident.longitude], {
+        pane: 'incident',
+        interactive: false,
+        keyboard: false,
+        icon: L.divIcon({
+          className: 'incident-centroid-marker',
+          html,
+          iconSize: [size, size],
+          iconAnchor: [size / 2, size / 2],
+        }),
+      });
+    }
+
     function googleMapsUrl(lat, lng) {
       const q = `${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`;
       return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
@@ -1692,9 +1770,10 @@
       const points = _triangleLatLngs(incident.latitude, incident.longitude, sizeMeters, seed);
       const triangle = L.polygon(points, {
         renderer: getMarkerRenderer(sev),
+        pane: 'incident',
         color,
-        weight: mode === 'history' ? 1 : 1.2,
-        opacity: 0.9,
+        weight: mode === 'history' ? 1.5 : 2,
+        opacity: 1,
         dashArray: approximate ? '5 4' : null,
         fillColor,
         fillOpacity: sev === 'medical'
@@ -1707,6 +1786,7 @@
       // Follow the full triangle and pad its edges so every visible part is easy to select.
       const hitTarget = L.polygon(points, {
         renderer: markerRenderer,
+        pane: 'incident',
         stroke: true,
         color: '#000000',
         weight: shouldUseMobileIncidentDialog() ? 36 : 20,
@@ -1718,7 +1798,8 @@
         bubblingMouseEvents: true,
         className: 'incident-marker-hit-target',
       });
-      const marker = L.featureGroup([triangle, hitTarget]);
+      const markerSymbol = _markerSymbol(incident, sev, seed);
+      const marker = L.featureGroup([triangle, markerSymbol, hitTarget]);
 
       // Right-click → open in Google Maps (useful on desktop)
       marker.on('contextmenu', () => {
@@ -3323,7 +3404,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.3.3', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.3.5', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
