@@ -1,4 +1,4 @@
-const CACHE_NAME = 'louisiana911-shell-v4.3.1';
+const CACHE_NAME = 'louisiana911-shell-v4.3.3';
 const CORE_ASSETS = [
   new URL('./', self.location).toString(),
   new URL('./index.html', self.location).toString(),

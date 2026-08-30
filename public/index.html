@@ -12,7 +12,7 @@
   <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
   <link rel="icon" href="/favicon-96x96.png" sizes="96x96" type="image/png">
   <link rel="apple-touch-icon" href="/images/louisiana911-icon-192.png" sizes="192x192">
-  <link rel="manifest" href="/manifest.webmanifest?v=4.3.1">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.3.3">
   <meta name="theme-color" content="#0a0a0f">
   <meta name="color-scheme" content="dark">
   <meta name="application-name" content="Louisiana911">
@@ -81,7 +81,7 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.3.1" />
+  <link rel="stylesheet" href="styles.css?v=4.3.3" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -216,7 +216,7 @@
           </a>
         </div>
         <p class="info-credit">Made by <a class="info-credit-link" href="mailto:vincent@vincentlarkin.com">Vincent Larkin</a></p>
-        <p class="info-version">v4.3.1</p>
+        <p class="info-version">v4.3.3</p>
       </div>
     </div>
   </div>
@@ -469,10 +469,16 @@
     const northEast = L.latLng(34.5, -88.5);
     map.setMaxBounds(L.latLngBounds(southWest, northEast));
     
-    // Keyless OpenStreetMap basemap, color-graded in CSS to match the dark interface.
+    // Minimal dark canvas with a separate sparse-label overlay, matching the
+    // original low-detail map while avoiding CARTO's API-key watermark.
     map.createPane('base');
     map.getPane('base').classList.add('leaflet-base-pane');
     map.getPane('base').style.zIndex = 200;
+
+    map.createPane('labels');
+    map.getPane('labels').classList.add('leaflet-labels-pane');
+    map.getPane('labels').style.zIndex = 650;
+    map.getPane('labels').style.pointerEvents = 'none';
 
     map.createPane('parish');
     map.getPane('parish').classList.add('leaflet-parish-pane');
@@ -484,15 +490,23 @@
     map.getPane('unitPulse').style.zIndex = 575;
     map.getPane('unitPulse').style.pointerEvents = 'none';
 
-    // The official OSM raster endpoint does not require a vendor API key.
-    const baseTileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    const baseTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
       pane: 'base',
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      attribution: 'Tiles &copy; Esri &mdash; Sources: Esri, HERE, Garmin, &copy; OpenStreetMap contributors, and the GIS User Community',
+      maxNativeZoom: 16,
       maxZoom: 19
+    });
+
+    const labelTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+      pane: 'labels',
+      maxNativeZoom: 16,
+      maxZoom: 19,
+      opacity: 1
     });
 
     function ensureMapTilesLoaded() {
       if (!map.hasLayer(baseTileLayer)) baseTileLayer.addTo(map);
+      if (!map.hasLayer(labelTileLayer)) labelTileLayer.addTo(map);
     }
 
     let parishOutlineLayer = null;
@@ -3309,7 +3323,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.3.1', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.3.3', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
