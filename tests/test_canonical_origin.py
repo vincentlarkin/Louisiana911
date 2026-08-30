@@ -77,8 +77,20 @@ class CanonicalOriginTests(unittest.TestCase):
 
         self.assertIn('World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', html)
         self.assertIn('World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', html)
-        self.assertNotIn('https://tile.openstreetmap.org/{z}/{x}/{y}.png', html)
+        self.assertIn('https://tile.openstreetmap.org/{z}/{x}/{y}.png', html)
+        self.assertIn("storedBasemapMode === 'detailed' ? 'detailed' : 'clean'", html)
+        self.assertIn('data-basemap="clean"', html)
+        self.assertIn('data-basemap="detailed"', html)
         self.assertNotIn('basemaps.cartocdn.com', html)
+
+    def test_incident_markers_have_a_fixed_visible_symbol_above_basemaps(self):
+        response = self.client.get('/', headers={'Host': 'localhost'})
+        html = response.get_data(as_text=True)
+
+        self.assertIn("map.createPane('incident')", html)
+        self.assertIn("map.getPane('incident').style.zIndex = 675", html)
+        self.assertIn("className: 'incident-centroid-marker'", html)
+        self.assertIn('L.featureGroup([triangle, markerSymbol, hitTarget])', html)
 
     def test_cross_origin_tiles_receive_origin_referrer(self):
         response = self.client.get('/', headers={'Host': 'localhost'})
@@ -119,9 +131,9 @@ class CanonicalOriginTests(unittest.TestCase):
     def test_versioned_shell_assets_are_immutable(self):
         for path in (
             '/analytics.js?v=4.3.0',
-            '/styles.css?v=4.3.3',
-            '/service-worker.js?v=4.3.3',
-            '/manifest.webmanifest?v=4.3.3',
+            '/styles.css?v=4.3.5',
+            '/service-worker.js?v=4.3.5',
+            '/manifest.webmanifest?v=4.3.5',
         ):
             with self.subTest(path=path):
                 response = self.client.get(path, headers={'Host': 'localhost'})
@@ -185,7 +197,7 @@ class CanonicalOriginTests(unittest.TestCase):
         self.assertIn("weight: shouldUseMobileIncidentDialog() ? 36 : 20", html)
         self.assertIn("fillOpacity: 0.001", html)
         self.assertIn("openIncidentDialog(activeIncident", html)
-        self.assertIn("const marker = L.featureGroup([triangle, hitTarget])", html)
+        self.assertIn("const marker = L.featureGroup([triangle, markerSymbol, hitTarget])", html)
 
     def test_history_rate_notice_is_connected_to_history_requests(self):
         response = self.client.get('/', headers={'Host': 'localhost'})
