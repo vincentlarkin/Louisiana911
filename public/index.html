@@ -12,7 +12,7 @@
   <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
   <link rel="icon" href="/favicon-96x96.png" sizes="96x96" type="image/png">
   <link rel="apple-touch-icon" href="/images/louisiana911-icon-192.png" sizes="192x192">
-  <link rel="manifest" href="/manifest.webmanifest?v=4.3.5">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.3.6">
   <meta name="theme-color" content="#0a0a0f">
   <meta name="color-scheme" content="dark">
   <meta name="application-name" content="Louisiana911">
@@ -81,7 +81,7 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.3.5" />
+  <link rel="stylesheet" href="styles.css?v=4.3.6" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -216,7 +216,7 @@
           </a>
         </div>
         <p class="info-credit">Made by <a class="info-credit-link" href="mailto:vincent@vincentlarkin.com">Vincent Larkin</a></p>
-        <p class="info-version">v4.3.5</p>
+        <p class="info-version">v4.3.6</p>
       </div>
     </div>
   </div>
@@ -225,17 +225,23 @@
     <div class="modal-backdrop" role="presentation"></div>
     <div class="modal-dialog incident-dialog" role="dialog" aria-modal="true" aria-labelledby="incident-modal-title">
       <div class="incident-modal-copy">
-        <p class="incident-modal-kicker">Incident details</p>
+        <p class="incident-modal-kicker" id="incident-modal-kicker">Incident details</p>
         <h3 id="incident-modal-title">Incident</h3>
         <div class="incident-modal-body" id="incident-modal-body"></div>
       </div>
       <div class="incident-modal-actions">
+        <div class="incident-modal-share-actions">
+          <button class="incident-modal-btn secondary" id="incident-modal-share" type="button">Share incident</button>
+          <button class="incident-modal-btn secondary" id="incident-modal-copy" type="button">Copy link</button>
+        </div>
         <a class="incident-modal-btn secondary" id="incident-modal-maps" href="#" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>
         <button class="incident-modal-btn secondary hidden" id="incident-modal-list-btn" type="button">Go to incident in list</button>
         <button class="incident-modal-btn primary" id="incident-modal-dismiss" type="button">Dismiss</button>
       </div>
     </div>
   </div>
+
+  <div class="incident-share-notice" id="incident-share-notice" role="status" aria-live="polite" aria-atomic="true">Incident link copied</div>
 
   <div class="history-request-notice" id="history-request-notice" role="status" aria-live="polite" aria-atomic="true" aria-hidden="true">
     <div class="history-request-notice-icon" aria-hidden="true">
@@ -862,6 +868,16 @@
     const markers = new Map();
     let currentIncidents = [];
     let currentHistoryIncidents = [];
+    const sharedIncidentDataElement = document.getElementById('shared-incident-data');
+    let sharedIncidentView = null;
+    let sharedIncidentHasOpened = false;
+    if (sharedIncidentDataElement) {
+      try {
+        sharedIncidentView = JSON.parse(sharedIncidentDataElement.textContent || 'null');
+      } catch (error) {
+        console.error('Failed to read shared incident data:', error);
+      }
+    }
     const sourceFromUrl = new URLSearchParams(window.location.search).get('source');
     const supportedSources = new Set(['all', 'caddo', 'batonrouge', 'lafayette', 'neworleans']);
     let currentSource = supportedSources.has(sourceFromUrl) ? sourceFromUrl : 'all';
@@ -975,6 +991,15 @@
       return false;
     }
 
+    function _includesWholeTerm(text, term) {
+      return (` ${text} `).includes(` ${term} `);
+    }
+
+    const FORCE_HIGH_SEVERITY_TERMS = [
+      'mass casualty', 'mass casualties', 'multiple casualty',
+      'mass casulty', 'mass causality',
+    ];
+
     const SEVERITY_TERMS = {
       custody: ['prisoner'],
       medical: ['medical emergency', 'caddo ems event'],
@@ -1022,7 +1047,12 @@
         return incident._severity;
       }
 
-      if (_includesAny(d, SEVERITY_TERMS.custody)) {
+      // Mass-casualty calls must override agency-based medical striping and
+      // always render as solid red/high severity. Public feeds sometimes use
+      // the MCI abbreviation or a common misspelling.
+      if (_includesAny(d, FORCE_HIGH_SEVERITY_TERMS) || _includesWholeTerm(d, 'mci')) {
+        incident._severity = 'high';
+      } else if (_includesAny(d, SEVERITY_TERMS.custody)) {
         incident._severity = 'custody';
       } else if (agency === 'EMS' || agency.includes('EMS')) {
         incident._severity = 'medical';
@@ -1678,6 +1708,114 @@
       return `${raw} ${Math.abs(numeric) === 1 ? 'unit' : 'units'}`;
     }
 
+    function getIncidentShareId(incident) {
+      const shareId = String(incident?.share_id || incident?.hash || '').trim().toLowerCase();
+      return /^[0-9a-f]{32}$/.test(shareId) ? shareId : '';
+    }
+
+    function incidentActivityState(incident, mode = 'live') {
+      const explicitlyActive = Number(incident?.is_active) === 1;
+      const explicitlyInactive = incident?.is_active != null && Number(incident.is_active) === 0;
+      const active = explicitlyActive || (!explicitlyInactive && mode === 'live');
+      const units = Number(incident?.units);
+      const veryActive = active && Number.isFinite(units) && units >= UNIT_PULSE_THRESHOLD;
+      return {
+        active,
+        veryActive,
+        label: veryActive ? 'BREAKING · VERY ACTIVE' : active ? 'ACTIVE INCIDENT' : 'HISTORICAL INCIDENT',
+        className: veryActive ? 'very-active' : active ? 'active' : 'historical',
+      };
+    }
+
+    function incidentShareUrl(incident) {
+      const shareId = getIncidentShareId(incident);
+      return shareId ? new URL(`/incident/${shareId}`, window.location.origin).toString() : '';
+    }
+
+    function showIncidentShareNotice(message) {
+      const notice = document.getElementById('incident-share-notice');
+      if (!notice) return;
+      notice.textContent = message;
+      notice.classList.add('open');
+      clearTimeout(showIncidentShareNotice._timer);
+      showIncidentShareNotice._timer = setTimeout(() => notice.classList.remove('open'), 2400);
+    }
+
+    async function copyTextToClipboard(text) {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      const input = document.createElement('textarea');
+      input.value = text;
+      input.setAttribute('readonly', '');
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      document.body.appendChild(input);
+      input.select();
+      const copied = document.execCommand('copy');
+      input.remove();
+      if (!copied) throw new Error('Copy command failed');
+    }
+
+    async function shareIncident(incident, { forceCopy = false, mode = 'live' } = {}) {
+      const url = incidentShareUrl(incident);
+      if (!url) {
+        showIncidentShareNotice('A share link is not available for this incident');
+        return false;
+      }
+
+      const activity = incidentActivityState(incident, mode);
+      const description = incident?.description || 'Public safety incident';
+      const location = incidentLocationText(incident);
+      const title = `${activity.label}: ${description}`;
+      const text = `${title} near ${location}. Louisiana911 public incident monitor.`;
+
+      if (!forceCopy && typeof navigator.share === 'function') {
+        try {
+          await navigator.share({ title, text, url });
+          return true;
+        } catch (error) {
+          if (error?.name === 'AbortError') return false;
+        }
+      }
+
+      try {
+        await copyTextToClipboard(url);
+        showIncidentShareNotice('Incident link copied');
+        return true;
+      } catch (error) {
+        console.error('Failed to copy incident link:', error);
+        showIncidentShareNotice('Could not copy the link');
+        return false;
+      }
+    }
+
+    function findIncidentByShareId(shareId) {
+      const normalized = String(shareId || '').trim().toLowerCase();
+      const pools = [
+        sharedIncidentView ? [sharedIncidentView] : [],
+        currentIncidents,
+        currentHistoryIncidents,
+        typeof allHistoryIncidentsForDay === 'undefined' ? [] : allHistoryIncidentsForDay,
+      ];
+      for (const pool of pools) {
+        const incident = (pool || []).find(item => getIncidentShareId(item) === normalized);
+        if (incident) return incident;
+      }
+      return null;
+    }
+
+    window.shareIncidentByShareId = function(shareId, options = {}) {
+      const incident = findIncidentByShareId(shareId);
+      if (!incident) {
+        showIncidentShareNotice('Incident details are no longer loaded');
+        return false;
+      }
+      const mode = Number(incident?.is_active) === 0 ? 'history' : 'live';
+      return shareIncident(incident, { ...options, mode });
+    };
+
     function shouldPulseForUnits(incident, mode) {
       const unitCount = Number(incident?.units);
       return mode === 'live' && Number.isFinite(unitCount) && unitCount >= UNIT_PULSE_THRESHOLD;
@@ -1738,6 +1876,7 @@
       const gmaps = googleMapsUrl(incident.latitude, incident.longitude);
       const unitLabel = formatUnitCount(incident?.units);
       const approximate = isApproximateLocation(incident);
+      const shareId = getIncidentShareId(incident);
 
       let popupHtml = `
         <div class="popup-content sev-${sev}">
@@ -1748,6 +1887,7 @@
           <div class="popup-detail"><span class="popup-label">Agency</span>${escapeHtml(agencyDisplay)} &bull; ${escapeHtml(unitLabel)}</div>
           <div class="popup-detail"><span class="popup-label">Severity</span>${escapeHtml(sev.toUpperCase())}</div>
           <a class="popup-link" href="${gmaps}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>
+          ${shareId ? `<button class="popup-share-btn" type="button" onclick="shareIncidentByShareId('${shareId}')">Share incident</button>` : ''}
       `;
 
       if (mode === 'history' && showAllHistoryOnMap) {
@@ -1941,6 +2081,7 @@
         : '';
       const locationText = incidentLocationText(incident);
       const approximate = isApproximateLocation(incident);
+      const shareId = getIncidentShareId(incident);
       
       return `
         <div class="incident-card ${sevClass} ${isNew ? 'new' : ''}${interactiveClass}"
@@ -1956,6 +2097,11 @@
           <div class="incident-meta">
             <span class="incident-agency ${sevClass}" title="Severity: ${sev.toUpperCase()}">${escapeHtml(agencyDisplay)}</span>
             <span class="incident-units">${escapeHtml(sev.toUpperCase())} • ${escapeHtml(unitLabel)} • ${escapeHtml(incident.municipality || 'Unknown')}</span>
+            ${shareId ? `
+            <button class="incident-share-btn" type="button" title="Share this incident" aria-label="Share ${escapeHtml(incident.description || 'incident')}" onclick="event.stopPropagation(); shareIncidentByShareId('${shareId}')" onkeydown="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"></circle><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5"></path></svg>
+              <span>Share</span>
+            </button>` : ''}
           </div>
         </div>
       `;
@@ -1983,12 +2129,17 @@
     const settingsClose = document.getElementById('settings-close');
     const showAllHistoryToggle = document.getElementById('setting-show-all-history');
     const incidentModal = document.getElementById('incident-modal');
+    const incidentModalKicker = document.getElementById('incident-modal-kicker');
     const incidentModalTitle = document.getElementById('incident-modal-title');
     const incidentModalBody = document.getElementById('incident-modal-body');
     const incidentModalMaps = document.getElementById('incident-modal-maps');
+    const incidentModalShare = document.getElementById('incident-modal-share');
+    const incidentModalCopy = document.getElementById('incident-modal-copy');
     const incidentModalListBtn = document.getElementById('incident-modal-list-btn');
     const incidentModalDismiss = document.getElementById('incident-modal-dismiss');
     let incidentModalTargetId = null;
+    let incidentModalIncident = null;
+    let incidentModalMode = 'live';
 
     function syncModalOpenState() {
       const hasOpenModal = Boolean(
@@ -2008,8 +2159,13 @@
       const municipality = incident?.municipality || 'Unknown';
       const unitLabel = formatUnitCount(incident?.units);
       const approximate = isApproximateLocation(incident);
+      const coordinates = incidentCoordinatePair(incident);
       const canJumpToList = mode === 'history' && showAllHistoryOnMap && Number.isFinite(Number(incident?.id));
+      const activity = incidentActivityState(incident, mode);
+      const canShare = Boolean(getIncidentShareId(incident));
 
+      incidentModalKicker.textContent = activity.label;
+      incidentModalKicker.className = `incident-modal-kicker ${activity.className}`;
       incidentModalTitle.textContent = incident?.description || 'Incident';
       incidentModalBody.innerHTML = `
         <div class="incident-modal-severity sev-${sev}">${escapeHtml(sev.toUpperCase())}</div>
@@ -2039,7 +2195,12 @@
           <span class="incident-modal-value">${escapeHtml(municipality)}</span>
         </div>
       `;
-      incidentModalMaps.href = googleMapsUrl(incident.latitude, incident.longitude);
+      incidentModalMaps.classList.toggle('hidden', !coordinates);
+      incidentModalMaps.href = coordinates ? googleMapsUrl(coordinates[0], coordinates[1]) : '#';
+      incidentModalIncident = incident;
+      incidentModalMode = mode;
+      incidentModalShare?.classList.toggle('hidden', !canShare);
+      incidentModalCopy?.classList.toggle('hidden', !canShare);
       incidentModalTargetId = canJumpToList ? Number(incident.id) : null;
       incidentModalListBtn?.classList.toggle('hidden', !canJumpToList);
       toggleIncidentDialog(true);
@@ -2052,6 +2213,7 @@
       incidentModal.setAttribute('aria-hidden', String(!next));
       if (!next) {
         incidentModalTargetId = null;
+        incidentModalIncident = null;
       }
       syncModalOpenState();
     };
@@ -2325,6 +2487,12 @@
       smoothFocusOnPoint(Number(center.latitude), Number(center.longitude), { targetZoom: 11 });
     });
     incidentModalDismiss?.addEventListener('click', () => toggleIncidentDialog(false));
+    incidentModalShare?.addEventListener('click', () => {
+      if (incidentModalIncident) shareIncident(incidentModalIncident, { mode: incidentModalMode });
+    });
+    incidentModalCopy?.addEventListener('click', () => {
+      if (incidentModalIncident) shareIncident(incidentModalIncident, { forceCopy: true, mode: incidentModalMode });
+    });
     incidentModal?.addEventListener('click', (e) => {
       if (e.target.classList.contains('modal-backdrop')) toggleIncidentDialog(false);
     });
@@ -2340,6 +2508,40 @@
       if (e.key === 'Escape' && settingsModal?.classList.contains('open')) toggleSettingsPanel(false);
     });
     
+    function renderSharedIncidentView() {
+      if (!sharedIncidentView) return;
+      sharedIncidentView.source = normalizeSource(sharedIncidentView.source);
+      const mode = Number(sharedIncidentView.is_active) === 1 ? 'live' : 'history';
+      const activity = incidentActivityState(sharedIncidentView, mode);
+      const listEl = document.getElementById('incident-list');
+
+      mapMode = mode;
+      setMapMarkers([sharedIncidentView], { mode });
+      listEl.innerHTML = `
+        <div class="shared-incident-banner ${activity.className}">
+          <span>${escapeHtml(activity.label)}</span>
+          <strong>Shared incident</strong>
+        </div>
+        ${createIncidentCard(sharedIncidentView, false)}
+      `;
+
+      if (!sharedIncidentHasOpened) {
+        sharedIncidentHasOpened = true;
+        setViewMode('map', { persist: false });
+        requestAnimationFrame(() => {
+          map.invalidateSize();
+          const coordinates = incidentCoordinatePair(sharedIncidentView);
+          if (coordinates) smoothFocusOnPoint(coordinates[0], coordinates[1], { targetZoom: 15 });
+          openIncidentDialog(sharedIncidentView, { mode });
+        });
+      } else if (
+        incidentModal?.classList.contains('open') &&
+        getIncidentShareId(incidentModalIncident) === getIncidentShareId(sharedIncidentView)
+      ) {
+        openIncidentDialog(sharedIncidentView, { mode });
+      }
+    }
+
     // Update incidents
     async function updateIncidents() {
       try {
@@ -2376,6 +2578,17 @@
 
         // If we're not on the Live tab, don't touch the map/list (History owns the map).
         if (!liveVisible) return;
+
+        if (sharedIncidentView) {
+          const liveVersion = allIncidents.find(
+            incident => getIncidentShareId(incident) === getIncidentShareId(sharedIncidentView)
+          );
+          if (liveVersion) {
+            sharedIncidentView = { ...sharedIncidentView, ...liveVersion, share_id: getIncidentShareId(sharedIncidentView) };
+          }
+          renderSharedIncidentView();
+          return;
+        }
         
         // Update map + list (filtered)
         setMapMarkers(incidents, { mode: 'live' });
@@ -3355,7 +3568,7 @@
     function syncMobilePanel() {
       const isMobile = mobileQuery.matches;
       document.body.classList.toggle('mobile-view', isMobile);
-      if (!shouldUseMobileIncidentDialog()) {
+      if (!shouldUseMobileIncidentDialog() && !sharedIncidentView) {
         toggleIncidentDialog(false);
       }
       if (!isMobile) {
@@ -3404,7 +3617,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.3.5', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.3.6', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);

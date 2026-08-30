@@ -942,6 +942,76 @@
       color: var(--text-dim);
     }
 
+    .incident-share-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      flex: 0 0 auto;
+      margin-left: auto;
+      padding: 4px 7px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.035);
+      color: var(--text-dim);
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .incident-share-btn svg {
+      width: 13px;
+      height: 13px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .incident-share-btn:hover,
+    .incident-share-btn:focus-visible {
+      color: var(--text);
+      border-color: rgba(59, 139, 255, 0.5);
+      background: rgba(59, 139, 255, 0.12);
+      outline: none;
+    }
+
+    .shared-incident-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 9px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.035);
+    }
+
+    .shared-incident-banner span {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+    }
+
+    .shared-incident-banner strong {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .shared-incident-banner.very-active {
+      border-color: rgba(255, 59, 59, 0.42);
+      background: linear-gradient(90deg, rgba(255, 59, 59, 0.18), rgba(255, 59, 59, 0.045));
+      box-shadow: 0 0 28px rgba(255, 59, 59, 0.1);
+    }
+
+    .shared-incident-banner.very-active span,
+    .shared-incident-banner.active span { color: var(--red); }
+    .shared-incident-banner.historical span { color: var(--text-dim); }
+
     @media (min-width: 721px) {
       body.list-view .tabs {
         max-width: 760px;
@@ -1750,6 +1820,15 @@
       color: var(--text-dim);
     }
 
+    .incident-modal-kicker.active,
+    .incident-modal-kicker.very-active {
+      color: var(--red);
+    }
+
+    .incident-modal-kicker.very-active {
+      text-shadow: 0 0 16px rgba(255, 59, 59, 0.42);
+    }
+
     .incident-modal-body {
       display: grid;
       gap: 10px;
@@ -1829,6 +1908,12 @@
       margin-top: 18px;
     }
 
+    .incident-modal-share-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
     .incident-modal-btn {
       display: inline-flex;
       align-items: center;
@@ -1859,6 +1944,30 @@
       background: rgba(255, 255, 255, 0.045);
       border-color: rgba(255, 255, 255, 0.08);
       color: var(--text);
+    }
+
+    .incident-share-notice {
+      position: fixed;
+      left: 50%;
+      bottom: calc(24px + env(safe-area-inset-bottom));
+      z-index: 3600;
+      padding: 11px 16px;
+      border: 1px solid rgba(59, 139, 255, 0.38);
+      border-radius: 12px;
+      background: rgba(14, 19, 29, 0.97);
+      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.48);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, 18px);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+
+    .incident-share-notice.open {
+      opacity: 1;
+      transform: translate(-50%, 0);
     }
     
     .modal-close {
@@ -2893,7 +3002,8 @@
       border-bottom-color: rgba(255, 59, 59, 0.6);
     }
     
-    .popup-goto-btn {
+    .popup-goto-btn,
+    .popup-share-btn {
       display: block;
       width: 100%;
       margin-top: 10px;
@@ -2908,7 +3018,8 @@
       transition: all 0.2s ease;
     }
     
-    .popup-goto-btn:hover {
+    .popup-goto-btn:hover,
+    .popup-share-btn:hover {
       background: rgba(59, 139, 255, 0.28);
       border-color: rgba(59, 139, 255, 0.65);
       color: var(--text);

@@ -131,9 +131,9 @@ class CanonicalOriginTests(unittest.TestCase):
     def test_versioned_shell_assets_are_immutable(self):
         for path in (
             '/analytics.js?v=4.3.0',
-            '/styles.css?v=4.3.5',
-            '/service-worker.js?v=4.3.5',
-            '/manifest.webmanifest?v=4.3.5',
+            '/styles.css?v=4.3.6',
+            '/service-worker.js?v=4.3.6',
+            '/manifest.webmanifest?v=4.3.6',
         ):
             with self.subTest(path=path):
                 response = self.client.get(path, headers={'Host': 'localhost'})
@@ -198,6 +198,83 @@ class CanonicalOriginTests(unittest.TestCase):
         self.assertIn("fillOpacity: 0.001", html)
         self.assertIn("openIncidentDialog(activeIncident", html)
         self.assertIn("const marker = L.featureGroup([triangle, markerSymbol, hitTarget])", html)
+
+    def test_incident_share_route_has_breaking_metadata_and_embedded_incident(self):
+        share_id = '0123456789abcdef0123456789abcdef'
+        conn = app.db_connect()
+        try:
+            conn.execute(
+                '''
+                INSERT INTO incidents (
+                    hash, agency, time, units, description, street, cross_streets,
+                    municipality, source, latitude, longitude, first_seen, last_seen, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    share_id, 'SFD', '1430', 8, 'MASS CASUALTY INCIDENT',
+                    '100 TEST ST', 'SAMPLE AVE', 'Shreveport', 'caddo',
+                    32.5252, -93.7502, '2026-08-29T19:30:00+00:00',
+                    '2026-08-29T19:35:00+00:00', 1,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.addCleanup(self._delete_incident, share_id)
+        response = self.client.get(f'/incident/{share_id}', headers={'Host': 'localhost'})
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(200, response.status_code)
+        self.assertIn('BREAKING - VERY ACTIVE: MASS CASUALTY INCIDENT', html)
+        self.assertIn(
+            f'<link rel="canonical" href="https://louisiana911.com/incident/{share_id}">',
+            html,
+        )
+        self.assertIn('<meta property="og:type" content="article">', html)
+        self.assertIn('<base href="/">', html)
+        self.assertIn('<meta name="robots" content="noindex,follow,max-image-preview:large">', html)
+        self.assertIn('id="shared-incident-data"', html)
+        self.assertIn(f'"share_id":"{share_id}"', html)
+        self.assertIn('"is_active":1', html)
+
+        conn = app.db_connect()
+        try:
+            conn.execute('UPDATE incidents SET is_active = 0 WHERE hash = ?', (share_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        historical = self.client.get(f'/incident/{share_id}', headers={'Host': 'localhost'})
+        historical_html = historical.get_data(as_text=True)
+        self.assertIn('INCIDENT REPORT: MASS CASUALTY INCIDENT', historical_html)
+        self.assertNotIn('BREAKING - VERY ACTIVE: MASS CASUALTY INCIDENT', historical_html)
+        self.assertIn('"is_active":0', historical_html)
+
+    def test_missing_or_malformed_incident_share_link_returns_404(self):
+        for share_id in ('not-an-incident', 'f' * 32):
+            with self.subTest(share_id=share_id):
+                response = self.client.get(f'/incident/{share_id}', headers={'Host': 'localhost'})
+                self.assertEqual(404, response.status_code)
+
+    def test_ui_has_incident_share_controls_and_mass_casualty_override(self):
+        response = self.client.get('/', headers={'Host': 'localhost'})
+        html = response.get_data(as_text=True)
+
+        self.assertIn('id="incident-modal-share"', html)
+        self.assertIn('id="incident-modal-copy"', html)
+        self.assertIn('shareIncidentByShareId', html)
+        self.assertIn("'mass casualty'", html)
+        self.assertIn("_includesWholeTerm(d, 'mci')", html)
+        self.assertIn("incident._severity = 'high'", html)
+
+    @staticmethod
+    def _delete_incident(share_id):
+        conn = app.db_connect()
+        try:
+            conn.execute('DELETE FROM incidents WHERE hash = ?', (share_id,))
+            conn.commit()
+        finally:
+            conn.close()
 
     def test_history_rate_notice_is_connected_to_history_requests(self):
         response = self.client.get('/', headers={'Host': 'localhost'})
