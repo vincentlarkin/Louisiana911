@@ -71,6 +71,21 @@ class CanonicalOriginTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
 
+    def test_map_uses_keyless_openstreetmap_tiles(self):
+        response = self.client.get('/', headers={'Host': 'localhost'})
+        html = response.get_data(as_text=True)
+
+        self.assertIn('https://tile.openstreetmap.org/{z}/{x}/{y}.png', html)
+        self.assertNotIn('basemaps.cartocdn.com', html)
+
+    def test_cross_origin_tiles_receive_origin_referrer(self):
+        response = self.client.get('/', headers={'Host': 'localhost'})
+
+        self.assertEqual(
+            'strict-origin-when-cross-origin',
+            response.headers['Referrer-Policy'],
+        )
+
     def test_coverage_pages_are_public_html(self):
         expected_pages = {
             '/coverage/': 'Louisiana 911 Coverage by City and Parish',
@@ -102,9 +117,9 @@ class CanonicalOriginTests(unittest.TestCase):
     def test_versioned_shell_assets_are_immutable(self):
         for path in (
             '/analytics.js?v=4.3.0',
-            '/styles.css?v=4.2.6',
-            '/service-worker.js?v=4.2.6',
-            '/manifest.webmanifest?v=4.2.6',
+            '/styles.css?v=4.3.1',
+            '/service-worker.js?v=4.3.1',
+            '/manifest.webmanifest?v=4.3.1',
         ):
             with self.subTest(path=path):
                 response = self.client.get(path, headers={'Host': 'localhost'})

@@ -968,7 +968,9 @@ def _security_headers(resp):
     # Minimal hardening headers (avoid breaking external map tiles/scripts)
     resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
     resp.headers.setdefault('X-Frame-Options', 'DENY')
-    resp.headers.setdefault('Referrer-Policy', 'same-origin')
+    # Preserve only the site origin on cross-origin requests. OSM's browser tile
+    # policy requires a valid Referer while this avoids exposing URL paths.
+    resp.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
     resp.headers.setdefault('Permissions-Policy', 'geolocation=(self), microphone=(), camera=()')
 
     # The HTML and APIs stay fresh, while explicitly versioned shell assets can

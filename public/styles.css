@@ -2891,13 +2891,8 @@
     }
 
     /* Keep map tile rendering lightweight for smooth pan/zoom. */
-    .leaflet-labels-pane .leaflet-tile {
-      filter: none;
-      opacity: 1;
-    }
-
     .leaflet-base-pane .leaflet-tile {
-      filter: none;
+      filter: invert(100%) hue-rotate(180deg) brightness(72%) contrast(92%) saturate(70%);
     }
     
     /* Prevent background scroll when modal is open */
