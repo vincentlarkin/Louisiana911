@@ -71,11 +71,13 @@ class CanonicalOriginTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
 
-    def test_map_uses_keyless_openstreetmap_tiles(self):
+    def test_map_uses_keyless_minimalist_dark_tiles(self):
         response = self.client.get('/', headers={'Host': 'localhost'})
         html = response.get_data(as_text=True)
 
-        self.assertIn('https://tile.openstreetmap.org/{z}/{x}/{y}.png', html)
+        self.assertIn('World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', html)
+        self.assertIn('World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', html)
+        self.assertNotIn('https://tile.openstreetmap.org/{z}/{x}/{y}.png', html)
         self.assertNotIn('basemaps.cartocdn.com', html)
 
     def test_cross_origin_tiles_receive_origin_referrer(self):
@@ -117,9 +119,9 @@ class CanonicalOriginTests(unittest.TestCase):
     def test_versioned_shell_assets_are_immutable(self):
         for path in (
             '/analytics.js?v=4.3.0',
-            '/styles.css?v=4.3.1',
-            '/service-worker.js?v=4.3.1',
-            '/manifest.webmanifest?v=4.3.1',
+            '/styles.css?v=4.3.3',
+            '/service-worker.js?v=4.3.3',
+            '/manifest.webmanifest?v=4.3.3',
         ):
             with self.subTest(path=path):
                 response = self.client.get(path, headers={'Host': 'localhost'})
