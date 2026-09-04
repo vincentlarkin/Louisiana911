@@ -7,6 +7,7 @@ be an emergency service or a replacement for calling 911.
 """
 
 import sqlite3
+import ipaddress
 import hashlib
 import base64
 import hmac
@@ -661,6 +662,11 @@ REPORT_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_REPORT_API_RATE_LIMIT', '
 INCIDENT_ACTIVE_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_ACTIVE_API_RATE_LIMIT', 'CADDO911_ACTIVE_API_RATE_LIMIT', '120'))
 INCIDENT_HISTORY_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_HISTORY_API_RATE_LIMIT', 'CADDO911_HISTORY_API_RATE_LIMIT', '10'))
 INCIDENT_OTHER_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_OTHER_API_RATE_LIMIT', 'CADDO911_OTHER_API_RATE_LIMIT', '90'))
+INCIDENT_HISTORY_REQUEST_RATE_LIMIT = int(os.environ.get('LOUISIANA911_HISTORY_REQUEST_RATE_LIMIT', '60'))
+HISTORY_HOURLY_DATE_LIMIT = int(os.environ.get('LOUISIANA911_HISTORY_HOURLY_DATE_LIMIT', '20'))
+HISTORY_DAILY_DATE_LIMIT = int(os.environ.get('LOUISIANA911_HISTORY_DAILY_DATE_LIMIT', '40'))
+TRUSTED_PROXY_HOPS = max(0, int(os.environ.get('LOUISIANA911_TRUSTED_PROXY_HOPS', '0')))
+ACCESS_LIMIT_DB = os.environ.get('LOUISIANA911_ACCESS_LIMIT_DB', '').strip()
 INCIDENT_HISTORY_MAX_LIMIT = int(_env_setting('LOUISIANA911_HISTORY_MAX_LIMIT', 'CADDO911_HISTORY_MAX_LIMIT', '2000'))
 REPORT_RATE_WINDOW_SECONDS = int(_env_setting('LOUISIANA911_REPORT_RATE_WINDOW_SECONDS', 'CADDO911_REPORT_RATE_WINDOW_SECONDS', '60'))
 HISTORY_UI_SESSION_MAX_AGE_SECONDS = int(_env_setting(
@@ -681,7 +687,7 @@ HISTORY_UI_COOKIE_NAME = 'l911_history_ui'
 HISTORY_UI_REQUEST_HEADER = 'X-Louisiana911-UI'
 _report_rate_lock = Lock()
 _report_rate_hits: dict[tuple[str, str], list[float]] = {}
-_history_date_rate_hits: dict[str, dict[str, float]] = {}
+_history_date_rate_hits: dict[tuple[str, int], dict[str, float]] = {}
 
 CANONICAL_SITE_HOST = 'louisiana911.com'
 
@@ -1001,16 +1007,25 @@ def _serve_shared_incident_page(incident: dict):
 
 
 def _client_ip_for_rate_limit() -> str:
-    forwarded_for = request.headers.get('X-Forwarded-For', '')
-    if forwarded_for:
-        return forwarded_for.split(',', 1)[0].strip() or 'unknown'
-    return request.remote_addr or 'unknown'
+    # Enable trusted hops only behind a proxy that overwrites incoming forwarding
+    # headers, with the app port inaccessible to untrusted direct connections.
+    candidate = request.remote_addr or 'unknown'
+    if TRUSTED_PROXY_HOPS:
+        forwarded = [part.strip() for part in request.headers.get('X-Forwarded-For', '').split(',') if part.strip()]
+        if len(forwarded) >= TRUSTED_PROXY_HOPS:
+            candidate = forwarded[-TRUSTED_PROXY_HOPS]
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return request.remote_addr or 'unknown'
 
 
 def _report_rate_bucket(path: str) -> tuple[str, int] | None:
     clean_path = path.rstrip('/') or '/'
     if clean_path == '/api/incidents/active':
         return 'incident-active-api', INCIDENT_ACTIVE_API_RATE_LIMIT
+    if clean_path == '/api/incidents/history':
+        return 'incident-history-api', INCIDENT_HISTORY_REQUEST_RATE_LIMIT
     if clean_path == '/api/incidents/history_counts':
         return 'incident-history-counts-api', INCIDENT_OTHER_API_RATE_LIMIT
     if clean_path.startswith('/api/reports/'):
@@ -1033,6 +1048,34 @@ def _rate_limited_response(retry_after_seconds: int):
     return resp
 
 
+def _persistent_history_date_limit(client_ip, date):
+    """Keep hourly/day quotas across workers and restarts in a separate small DB."""
+    now = time.time()
+    client_key = hmac.new(HISTORY_UI_SECRET, client_ip.encode(), hashlib.sha256).hexdigest()
+    conn = None
+    try:
+        conn = sqlite3.connect(ACCESS_LIMIT_DB, timeout=2)
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('CREATE TABLE IF NOT EXISTS history_access (client_key TEXT, date TEXT, first_seen REAL, PRIMARY KEY(client_key,date))')
+        conn.execute('CREATE INDEX IF NOT EXISTS history_access_expiry ON history_access(first_seen)')
+        conn.execute('BEGIN IMMEDIATE')
+        conn.execute('DELETE FROM history_access WHERE first_seen <= ?', (now - 86400,))
+        visits = dict(conn.execute('SELECT date,first_seen FROM history_access WHERE client_key=?', (client_key,)))
+        for seconds, maximum in ((3600, HISTORY_HOURLY_DATE_LIMIT), (86400, HISTORY_DAILY_DATE_LIMIT)):
+            within = {day: stamp for day, stamp in visits.items() if stamp > now - seconds}
+            if maximum > 0 and date not in within and len(within) >= maximum:
+                return _rate_limited_response(max(1, math.ceil(seconds - (now - min(within.values())))))
+        conn.execute('INSERT OR IGNORE INTO history_access VALUES (?,?,?)', (client_key, date, now))
+        conn.commit()
+        return None
+    except sqlite3.Error:
+        # Losing the quota store must not silently turn history into an unlimited feed.
+        return _rate_limited_response(60)
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def _check_report_rate_limit():
     if REPORT_RATE_WINDOW_SECONDS <= 0:
         return None
@@ -1040,29 +1083,38 @@ def _check_report_rate_limit():
     clean_path = request.path.rstrip('/') or '/'
     if clean_path == '/api/incidents/history':
         date = (request.args.get('date') or '').strip()
-        if not date or INCIDENT_HISTORY_API_RATE_LIMIT <= 0:
-            return None
-
-        now = time.monotonic()
-        cutoff = now - REPORT_RATE_WINDOW_SECONDS
-        client_ip = _client_ip_for_rate_limit()
-        with _report_rate_lock:
-            dates = {
-                stored_date: stamp
-                for stored_date, stamp in _history_date_rate_hits.get(client_ip, {}).items()
-                if stamp > cutoff
-            }
-            if date in dates:
-                _history_date_rate_hits[client_ip] = dates
-                return None
-            if len(dates) >= INCIDENT_HISTORY_API_RATE_LIMIT:
-                oldest = min(dates.values()) if dates else now
-                retry_after = max(1, int(math.ceil(REPORT_RATE_WINDOW_SECONDS - (now - oldest))))
-                _history_date_rate_hits[client_ip] = dates
-                return _rate_limited_response(retry_after)
-            dates[date] = now
-            _history_date_rate_hits[client_ip] = dates
-        return None
+        bounds = _central_date_bounds_utc(date)
+        if bounds:
+            date = _central_date_key(bounds[0])
+            now = time.monotonic()
+            client_ip = _client_ip_for_rate_limit()
+            windows = [(REPORT_RATE_WINDOW_SECONDS, INCIDENT_HISTORY_API_RATE_LIMIT)]
+            if ACCESS_LIMIT_DB:
+                quota_response = _persistent_history_date_limit(client_ip, date)
+                if quota_response is not None:
+                    return quota_response
+            else:
+                windows.extend(((3600, HISTORY_HOURLY_DATE_LIMIT), (86400, HISTORY_DAILY_DATE_LIMIT)))
+            with _report_rate_lock:
+                pending = {}
+                for seconds, maximum in windows:
+                    if maximum <= 0:
+                        continue
+                    key = (client_ip, seconds)
+                    dates = {day: stamp for day, stamp in _history_date_rate_hits.get(key, {}).items()
+                             if stamp > now - seconds}
+                    if date not in dates and len(dates) >= maximum:
+                        wait = max(1, math.ceil(seconds - (now - min(dates.values()))))
+                        return _rate_limited_response(wait)
+                    dates.setdefault(date, now)
+                    pending[key] = dates
+                _history_date_rate_hits.update(pending)
+                if len(_history_date_rate_hits) > 2000:
+                    stale = [key for key, dates in _history_date_rate_hits.items()
+                             if not any(stamp > now - key[1] for stamp in dates.values())]
+                    for key in stale:
+                        _history_date_rate_hits.pop(key, None)
+        # Repeated pages still consume the request budget, even on the same date.
 
     bucket = _report_rate_bucket(request.path)
     if bucket is None:
@@ -3984,6 +4036,18 @@ def monthly_reports_redirect():
 def healthz():
     return jsonify({'ok': True})
 
+PUBLIC_INCIDENT_FIELDS = (
+    'id', 'hash', 'agency', 'time', 'units', 'description', 'street', 'cross_streets',
+    'municipality', 'source', 'latitude', 'longitude', 'first_seen', 'last_seen',
+    'is_active', 'geocode_source', 'geocode_quality',
+)
+
+
+def _public_incident(incident):
+    # Never serialize a database row wholesale: new internal columns stay private.
+    return {field: incident.get(field) for field in PUBLIC_INCIDENT_FIELDS}
+
+
 @app.route('/api/incidents/active')
 def get_active_incidents():
     source_filter = _normalize_source_filter(request.args.get('source'))
@@ -4006,7 +4070,7 @@ def get_active_incidents():
     if source_filter != 'all':
         incidents = [incident for incident in incidents if _incident_matches_source_filter(incident, source_filter)]
     conn.close()
-    return jsonify(incidents)
+    return jsonify([_public_incident(incident) for incident in incidents])
 
 def _query_history_candidates(conn, bounds, source_filter, candidate_limit, *, archived=False):
     """Read only the prefix needed to merge one page across live/archive databases."""
@@ -4082,7 +4146,7 @@ def get_history():
     paginated = all_incidents[offset:offset + limit]
     for incident in paginated:
         incident['source'] = _normalize_incident_source_for_read(incident.get('source'))
-    return jsonify({'incidents': paginated, 'total': total})
+    return jsonify({'incidents': [_public_incident(incident) for incident in paginated], 'total': total})
 
 @app.route('/api/incidents/history_counts')
 def get_history_counts():

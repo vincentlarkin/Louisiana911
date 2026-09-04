@@ -302,3 +302,17 @@ test('five-unit pulse follows marker shape and stops for history or lower unit c
   ctx.syncUnitPulseRing(marker, { ...call, latitude: null }, 'live');
   assert.equal(layers.size, 0);
 });
+
+test('history notices respect hour-long Retry-After values', () => {
+  const text = {}, progress = { style: {} };
+  const ctx = loadFunctions(['updateHistoryRequestNotice', 'showHistoryRequestNotice'], {
+    historyRequestNoticeDeadline: 0, historyRequestNoticeDuration: 1,
+    historyRequestNoticeTimer: null, historyRequestNoticeHideTimer: null,
+    historyRequestNotice: { classList: { add() {} }, setAttribute() {} },
+    historyRequestNoticeText: text, historyRequestNoticeProgress: progress,
+    Date: { now: () => 1000000 }, setInterval: () => 1, clearInterval() {}, clearTimeout() {},
+  });
+  ctx.showHistoryRequestNotice(7200);
+  assert.equal(ctx.historyRequestNoticeDeadline, 8200000);
+  assert.match(text.textContent, /2 hours/);
+});

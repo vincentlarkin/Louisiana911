@@ -13,7 +13,7 @@
   <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
   <link rel="icon" href="/favicon-96x96.png" sizes="96x96" type="image/png">
   <link rel="apple-touch-icon" href="/images/louisiana911-icon-192.png" sizes="192x192">
-  <link rel="manifest" href="/manifest.webmanifest?v=4.4.1">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.4.2">
   <meta name="theme-color" content="#0a0a0f">
   <meta name="color-scheme" content="dark">
   <meta name="application-name" content="Louisiana911">
@@ -83,7 +83,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.4.1" />
+  <link rel="stylesheet" href="styles.css?v=4.4.2" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -228,7 +228,7 @@
           </a>
         </div>
         <p class="info-credit">Made by <a class="info-credit-link" href="mailto:vincent@vincentlarkin.com">Vincent Larkin</a></p>
-        <p class="info-version">v4.4.1</p>
+        <p class="info-version">v4.4.2</p>
       </div>
     </div>
   </div>
@@ -263,7 +263,7 @@
       </svg>
     </div>
     <div class="history-request-notice-copy">
-      <strong>History paused briefly</strong>
+      <strong>History request limit</strong>
       <span id="history-request-notice-text">Please wait a moment, then try that date again.</span>
     </div>
     <button class="history-request-notice-close" id="history-request-notice-close" type="button" aria-label="Dismiss notice">×</button>
@@ -2927,9 +2927,10 @@
 
     function updateHistoryRequestNotice() {
       const secondsLeft = Math.max(0, Math.ceil((historyRequestNoticeDeadline - Date.now()) / 1000));
-      const unit = secondsLeft === 1 ? 'second' : 'seconds';
+      const amount = secondsLeft >= 3600 ? Math.ceil(secondsLeft / 3600) : secondsLeft >= 60 ? Math.ceil(secondsLeft / 60) : secondsLeft;
+      const unit = secondsLeft >= 3600 ? 'hour' : secondsLeft >= 60 ? 'minute' : 'second';
       historyRequestNoticeText.textContent = secondsLeft > 0
-        ? `Please wait ${secondsLeft} ${unit}, then try that date again.`
+        ? `Please wait about ${amount} ${unit}${amount === 1 ? '' : 's'}, then try that date again.`
         : 'You can try that date again now.';
       historyRequestNoticeProgress.style.transform = `scaleX(${Math.min(1, secondsLeft / historyRequestNoticeDuration)})`;
       if (secondsLeft <= 0) {
@@ -2940,7 +2941,7 @@
     }
 
     function showHistoryRequestNotice(retrySeconds = 10) {
-      const safeSeconds = Math.min(300, Math.max(1, Math.ceil(Number(retrySeconds) || 10)));
+      const safeSeconds = Math.min(86400, Math.max(1, Math.ceil(Number(retrySeconds) || 10)));
       historyRequestNoticeDeadline = Math.max(historyRequestNoticeDeadline, Date.now() + safeSeconds * 1000);
       historyRequestNoticeDuration = Math.max(1, Math.ceil((historyRequestNoticeDeadline - Date.now()) / 1000));
       historyRequestNotice.classList.add('open');
@@ -3676,7 +3677,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.4.1', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.4.2', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
