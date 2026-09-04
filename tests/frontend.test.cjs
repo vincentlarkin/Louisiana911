@@ -23,6 +23,42 @@ function deferred() {
 const incident = { id: 1, source: 'caddo', latitude: 32.5, longitude: -93.7,
   description: 'TRAFFIC STOP', street: 'MAIN ST', units: 1, time: '1200' };
 
+test('delayed calls sort by original date across midnight and display Louisiana dates', () => {
+  const ctx = loadFunctions(['_incidentTimeValue', 'incidentTimeLabel'], { formatTime: value => value });
+  const older = { source: 'lakecharles', time: '2355', first_seen: '2026-09-03T04:55:00Z' };
+  const newer = { source: 'lakecharles', time: '0010', first_seen: '2026-09-03T05:10:00Z' };
+  assert.ok(ctx._incidentTimeValue(newer) > ctx._incidentTimeValue(older));
+  assert.match(ctx.incidentTimeLabel(older), /Sep 2/);
+  assert.match(ctx.incidentTimeLabel(newer), /Sep 3/);
+});
+
+test('Lake Charles has its own source and cannot be labeled active or breaking', () => {
+  const ctx = loadFunctions(['normalizeSource', 'sourceLabel', 'incidentActivityState', 'formatUnitCount'], { UNIT_PULSE_THRESHOLD: 5 });
+  assert.equal(ctx.normalizeSource('lakecharles'), 'lakecharles');
+  assert.match(ctx.sourceLabel('lakecharles'), /24h delay/);
+  const state = ctx.incidentActivityState({ source: 'lakecharles', is_active: 1, units: 10 });
+  assert.equal(state.active, false);
+  assert.equal(state.veryActive, false);
+  assert.match(state.label, /CLOSED CALL/);
+  assert.equal(ctx.formatUnitCount(0), 'Units not listed');
+});
+
+test('Lake Charles delay notice stays honest when no recent calls are available', () => {
+  const banner = { classList: { add() {}, remove() {} } };
+  const text = {};
+  const ctx = loadFunctions(['normalizeSource', 'formatPublishedAge', 'updateSourceDelayBanner'], {
+    currentSource: 'lakecharles', currentIncidents: [],
+    document: { getElementById: id => id === 'source-delay-banner' ? banner : text },
+  });
+  ctx.updateSourceDelayBanner();
+  assert.match(text.textContent, /published after 24h/);
+  assert.match(text.textContent, /unavailable/);
+  assert.doesNotMatch(text.textContent, /loading|live/i);
+  ctx.currentIncidents = [{ source: 'lakecharles', first_seen: new Date(Date.now() - 26 * 3600000).toISOString() }];
+  ctx.updateSourceDelayBanner();
+  assert.match(text.textContent, /newest call 1d 2h ago/);
+});
+
 test('triangle preference renders one transparent shape without a nested circle', () => {
   const ctx = loadFunctions(['markerIcon'], {
     triangleMarkers: true, getSeverity: () => 'low', getSeverityColor: () => '#3b8bff',
@@ -81,7 +117,7 @@ function liveContext() {
     liveRequestId: 0, currentSource: 'caddo', currentIncidents: [], sharedIncidentView: null,
     fetch: () => { const r = deferred(); requests.push(r); return r.promise; },
     sourceQueryParam: () => 'source=caddo', normalizeSource: s => s,
-    updateNewOrleansDelayBanner() {}, updateFilterButtonVisibility() {},
+    updateSourceDelayBanner() {}, updateFilterButtonVisibility() {},
     getFilteredIncidents: items => items,
     document: { getElementById: () => ({ classList: { contains: () => false } }) },
     setMapMarkers: items => { ctx.rendered = items; }, renderIncidentList() {},

@@ -638,7 +638,8 @@
     }
 
     .source-tabs {
-      display: flex;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 6px;
       padding: 8px;
       border-bottom: 1px solid var(--border);
@@ -717,6 +718,19 @@
       border-radius: 50%;
       background: #78aaff;
       box-shadow: 0 0 0 3px rgba(59, 139, 255, 0.11);
+    }
+
+    .source-tabs .source-tab {
+      justify-content: center;
+      padding-inline: 6px;
+      gap: 4px;
+    }
+
+    .incident-publication {
+      color: var(--text-dim);
+      font-size: 10px;
+      line-height: 1.4;
+      margin: 0 0 5px;
     }
 
     .source-group {
@@ -3330,6 +3344,8 @@
       }
 
       .source-tabs {
+        display: flex;
+        flex-wrap: nowrap;
         padding: 8px max(8px, env(safe-area-inset-right)) 8px max(8px, env(safe-area-inset-left));
         gap: 7px;
       }

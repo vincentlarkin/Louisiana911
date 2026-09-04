@@ -319,7 +319,7 @@
 
   function getSourceView() {
     const source = new URLSearchParams(location.search).get('source') || '';
-    return ['caddo', 'batonrouge', 'lafayette', 'neworleans'].includes(source) ? source : 'all';
+    return ['caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles'].includes(source) ? source : 'all';
   }
 
   function getActionType(target, link, mapElement) {
