@@ -23,6 +23,26 @@ function deferred() {
 const incident = { id: 1, source: 'caddo', latitude: 32.5, longitude: -93.7,
   description: 'TRAFFIC STOP', street: 'MAIN ST', units: 1, time: '1200' };
 
+test('hang-up and open-line calls are blue; suicide attempts are solid red', () => {
+  const ctx = loadFunctions(['_normalizeDesc', '_includesAny', '_includesWholeTerm', 'getSeverity', 'getSeverityColor']);
+  const start = html.indexOf('    const FORCE_HIGH_SEVERITY_TERMS =');
+  const end = html.indexOf('    function getSeverity(', start);
+  vm.runInContext(html.slice(start, end), ctx);
+  for (const description of ['HANG UP CALL', 'HANG-UP CALL', '911 HANGUP', 'OPEN LINE TO 911', 'OPEN 911 LINE', '911 OPEN LINE']) {
+    const severity = ctx.getSeverity({ description, agency: 'LCPD' });
+    assert.equal(severity, 'low', description);
+    assert.equal(ctx.getSeverityColor(severity), '#3b8bff');
+  }
+  for (const agency of ['LCPD', 'EMS']) {
+    for (const description of ['SUICIDE ATTEMPT', 'ATTEMPTED SUICIDE']) {
+      const severity = ctx.getSeverity({ description, agency });
+      assert.equal(severity, 'high', `${agency}: ${description}`);
+      assert.equal(ctx.getSeverityColor(severity), '#ff3b3b');
+    }
+  }
+  assert.equal(ctx.getSeverity({ description: 'HANG UP CALL - SHOTS FIRED', agency: 'LCPD' }), 'high');
+});
+
 test('delayed calls sort by original date across midnight and display Louisiana dates', () => {
   const ctx = loadFunctions(['_incidentTimeValue', 'incidentTimeLabel'], { formatTime: value => value });
   const older = { source: 'lakecharles', time: '2355', first_seen: '2026-09-03T04:55:00Z' };
