@@ -367,6 +367,7 @@ def init_db():
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_hash ON incidents(hash)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_active ON incidents(is_active)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_active_first_seen ON incidents(is_active, first_seen DESC, id DESC)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_first_seen ON incidents(first_seen)')
 
     # Add geocoding metadata columns (safe to run on an existing DB; does NOT delete data)
@@ -477,14 +478,23 @@ def archive_old_incidents(*, dry_run: bool = False) -> dict:
             archive_cursor = archive_conn.cursor()
             
             for inc in incidents:
-                # Insert into archive (use INSERT OR IGNORE to handle duplicates)
+                # Refresh a prior copy after interrupted archiving or later corrections.
                 try:
                     archive_cursor.execute('''
-                        INSERT OR IGNORE INTO incidents 
+                        INSERT INTO incidents
                         (hash, agency, time, units, description, street, cross_streets, municipality, source,
                          latitude, longitude, first_seen, last_seen, is_active,
                          geocode_source, geocode_quality, geocode_query, geocoded_at, geocode_version)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(hash) DO UPDATE SET
+                            agency=excluded.agency, time=excluded.time, units=excluded.units,
+                            description=excluded.description, street=excluded.street,
+                            cross_streets=excluded.cross_streets, municipality=excluded.municipality,
+                            source=excluded.source, latitude=excluded.latitude, longitude=excluded.longitude,
+                            first_seen=excluded.first_seen, last_seen=excluded.last_seen,
+                            is_active=excluded.is_active, geocode_source=excluded.geocode_source,
+                            geocode_quality=excluded.geocode_quality, geocode_query=excluded.geocode_query,
+                            geocoded_at=excluded.geocoded_at, geocode_version=excluded.geocode_version
                     ''', (
                         inc.get('hash'),
                         inc.get('agency'),
@@ -506,7 +516,7 @@ def archive_old_incidents(*, dry_run: bool = False) -> dict:
                         inc.get('geocoded_at'),
                         inc.get('geocode_version'),
                     ))
-                    hashes_to_delete.append(inc.get('hash'))
+                    hashes_to_delete.append((inc.get('hash'), inc.get('last_seen'), inc.get('geocoded_at')))
                     archived_count += 1
                 except Exception as e:
                     log(f"[ARCHIVE] Error archiving incident {inc.get('hash')}: {e}")
@@ -522,13 +532,13 @@ def archive_old_incidents(*, dry_run: bool = False) -> dict:
     # Delete archived incidents from main DB
     if not dry_run and hashes_to_delete:
         log(f"[ARCHIVE] Removing {len(hashes_to_delete)} archived incidents from main DB...")
-        for h in hashes_to_delete:
-            cursor.execute('DELETE FROM incidents WHERE hash = ?', (h,))
+        cursor.executemany(
+            'DELETE FROM incidents WHERE hash = ? AND is_active = 0 AND last_seen IS ? AND geocoded_at IS ?',
+            hashes_to_delete,
+        )
         conn.commit()
-        
-        # Vacuum to reclaim space
-        log("[ARCHIVE] Running VACUUM to reclaim space...")
-        conn.execute("VACUUM")
+        # SQLite reuses freed pages. Avoid a full database rewrite/writer lock
+        # after every routine archive; file compaction belongs in maintenance.
     
     conn.close()
     
@@ -2442,6 +2452,20 @@ def _new_orleans_processing_priority(incident: dict) -> tuple[int, int]:
     return active_rank, 0 if has_official_point else 1
 
 
+def _collector_geocode_result(conn, incident, source):
+    # Published coordinates are local work and can stay in the current batch.
+    # Release SQLite's single writer slot before any possible provider request.
+    try:
+        has_source_point = _is_in_source_bounds(
+            float(incident.get('latitude')), float(incident.get('longitude')), source,
+        )
+    except (TypeError, ValueError):
+        has_source_point = False
+    if not has_source_point:
+        conn.commit()
+    return _incident_geocode_result(incident, source)
+
+
 def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: bool = True):
     """Store/update incidents in database"""
     global last_update
@@ -2563,7 +2587,7 @@ def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: b
                 if reusable_approximation:
                     continue
 
-                current_geo = _incident_geocode_result(incident, incident_source)
+                current_geo = _collector_geocode_result(conn, incident, incident_source)
                 has_current_coords = (
                     current_geo.get('lat') is not None
                     and current_geo.get('lng') is not None
@@ -2601,7 +2625,7 @@ def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: b
             except (TypeError, ValueError):
                 has_source_point = False
             if has_source_point:
-                current_geo = _incident_geocode_result(incident, incident_source)
+                current_geo = _collector_geocode_result(conn, incident, incident_source)
                 cursor.execute(
                     '''UPDATE incidents
                        SET latitude = ?, longitude = ?, geocode_source = ?,
@@ -2635,7 +2659,7 @@ def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: b
                 low_quality = (existing_source in (None, "fallback", "skipped", "unresolved")) or (existing_quality in (None, "fallback", "city-only", "cross-only", "unknown-location", "unresolved"))
                 stale_version = existing_version != GEOCODER_VERSION
                 if (needs_geo or low_quality or stale_version) and (incident.get('street') or incident.get('cross_streets')):
-                    geo = _incident_geocode_result(incident, incident_source)
+                    geo = _collector_geocode_result(conn, incident, incident_source)
                     if geo:
                         new_has_coords = geo.get('lat') is not None and geo.get('lng') is not None
                         provider_confirmed = new_has_coords or bool(geo.get('provider_responded'))
@@ -2678,7 +2702,7 @@ def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: b
                 pass
         else:
             # New incident - geocode and insert
-            geo = _incident_geocode_result(incident, incident_source)
+            geo = _collector_geocode_result(conn, incident, incident_source)
             first_seen = occurred_at or now
             try:
                 cursor.execute('''
@@ -3984,6 +4008,33 @@ def get_active_incidents():
     conn.close()
     return jsonify(incidents)
 
+def _query_history_candidates(conn, bounds, source_filter, candidate_limit, *, archived=False):
+    """Read only the prefix needed to merge one page across live/archive databases."""
+    cursor = conn.cursor()
+    has_source = _incidents_table_has_source_column(cursor)
+    if source_filter not in ('all', 'caddo') and not has_source:
+        return [], 0
+    clauses = ['first_seen >= ?', 'first_seen < ?']
+    args = list(bounds)
+    if not archived:
+        clauses.append('is_active = 0')
+    if source_filter == 'caddo' and has_source:
+        clauses.append("(source = 'caddo' OR source IS NULL OR TRIM(source) = '')")
+    elif source_filter != 'all' and has_source:
+        clauses.append('source = ?')
+        args.append(source_filter)
+    where = ' AND '.join(clauses)
+    # Count and page use the same snapshot even if the collector updates rows.
+    if not conn.in_transaction:
+        conn.execute('BEGIN')
+    total = cursor.execute(f'SELECT COUNT(*) FROM incidents WHERE {where}', args).fetchone()[0]
+    rows = cursor.execute(
+        f'SELECT * FROM incidents WHERE {where} ORDER BY first_seen DESC, id DESC LIMIT ?',
+        (*args, candidate_limit),
+    ).fetchall()
+    return [dict(row) for row in rows], total
+
+
 @app.route('/api/incidents/history')
 def get_history():
     ui_guard = _history_ui_request_guard()
@@ -3994,160 +4045,43 @@ def get_history():
     requested_offset = request.args.get('offset', 0, type=int)
     limit = max(1, min(requested_limit or 100, max(1, INCIDENT_HISTORY_MAX_LIMIT)))
     offset = max(0, requested_offset or 0)
-    date = request.args.get('date')  # YYYY-MM-DD format
+    date = request.args.get('date')
     source_filter = _normalize_source_filter(request.args.get('source'))
+    bounds = _central_date_bounds_utc(date)
+    if not bounds:
+        return jsonify({'error': 'a valid date is required (YYYY-MM-DD)'}), 400
 
-    if not date:
-        return jsonify({'error': 'date is required (YYYY-MM-DD)'}), 400
-
-    all_incidents: list[dict] = []
-    total = 0
-
-    # Query main database
+    # Any result in the merged first K rows must be in its own database's first K.
+    # This keeps page one bounded even when a day contains thousands of calls.
+    candidate_limit = min(offset + limit, 2**63 - 1)
     conn = db_connect(row_factory=True)
-    cursor = conn.cursor()
-    has_source_column = _ensure_incidents_source_column(conn)
+    try:
+        all_incidents, total = _query_history_candidates(conn, bounds, source_filter, candidate_limit)
+    finally:
+        conn.close()
 
-    if date:
-        bounds = _central_date_bounds_utc(date)
-        if bounds:
-            start_utc, end_utc = bounds
-            if source_filter == 'all':
-                cursor.execute(
-                    'SELECT * FROM incidents WHERE is_active = 0 AND first_seen >= ? AND first_seen < ? ORDER BY first_seen DESC',
-                    (start_utc, end_utc)
-                )
-            elif source_filter == 'caddo' and has_source_column:
-                cursor.execute(
-                    "SELECT * FROM incidents WHERE is_active = 0 AND first_seen >= ? AND first_seen < ? AND (source = 'caddo' OR source IS NULL OR TRIM(source) = '') ORDER BY first_seen DESC",
-                    (start_utc, end_utc)
-                )
-            elif source_filter == 'caddo':
-                cursor.execute(
-                    'SELECT * FROM incidents WHERE is_active = 0 AND first_seen >= ? AND first_seen < ? ORDER BY first_seen DESC',
-                    (start_utc, end_utc)
-                )
-            elif not has_source_column:
-                cursor.execute('SELECT * FROM incidents WHERE 1 = 0')
-            else:
-                cursor.execute(
-                    'SELECT * FROM incidents WHERE is_active = 0 AND first_seen >= ? AND first_seen < ? AND source = ? ORDER BY first_seen DESC',
-                    (start_utc, end_utc, source_filter)
-                )
-            all_incidents.extend([dict(row) for row in cursor.fetchall()])
-            if source_filter == 'all':
-                cursor.execute(
-                    'SELECT COUNT(*) as count FROM incidents WHERE is_active = 0 AND first_seen >= ? AND first_seen < ?',
-                    (start_utc, end_utc)
-                )
-            elif source_filter == 'caddo' and has_source_column:
-                cursor.execute(
-                    "SELECT COUNT(*) as count FROM incidents WHERE is_active = 0 AND first_seen >= ? AND first_seen < ? AND (source = 'caddo' OR source IS NULL OR TRIM(source) = '')",
-                    (start_utc, end_utc)
-                )
-            elif source_filter == 'caddo':
-                cursor.execute(
-                    'SELECT COUNT(*) as count FROM incidents WHERE is_active = 0 AND first_seen >= ? AND first_seen < ?',
-                    (start_utc, end_utc)
-                )
-            elif not has_source_column:
-                cursor.execute('SELECT 0 as count')
-            else:
-                cursor.execute(
-                    'SELECT COUNT(*) as count FROM incidents WHERE is_active = 0 AND first_seen >= ? AND first_seen < ? AND source = ?',
-                    (start_utc, end_utc, source_filter)
-                )
-            total += cursor.fetchone()['count']
-    else:
-        if source_filter == 'all':
-            cursor.execute('SELECT * FROM incidents WHERE is_active = 0 ORDER BY first_seen DESC')
-        elif source_filter == 'caddo' and has_source_column:
-            cursor.execute("SELECT * FROM incidents WHERE is_active = 0 AND (source = 'caddo' OR source IS NULL OR TRIM(source) = '') ORDER BY first_seen DESC")
-        elif source_filter == 'caddo':
-            cursor.execute('SELECT * FROM incidents WHERE is_active = 0 ORDER BY first_seen DESC')
-        elif not has_source_column:
-            cursor.execute('SELECT * FROM incidents WHERE 1 = 0')
-        else:
-            cursor.execute('SELECT * FROM incidents WHERE is_active = 0 AND source = ? ORDER BY first_seen DESC', (source_filter,))
-        all_incidents.extend([dict(row) for row in cursor.fetchall()])
-        if source_filter == 'all':
-            cursor.execute('SELECT COUNT(*) as count FROM incidents WHERE is_active = 0')
-        elif source_filter == 'caddo' and has_source_column:
-            cursor.execute("SELECT COUNT(*) as count FROM incidents WHERE is_active = 0 AND (source = 'caddo' OR source IS NULL OR TRIM(source) = '')")
-        elif source_filter == 'caddo':
-            cursor.execute('SELECT COUNT(*) as count FROM incidents WHERE is_active = 0')
-        elif not has_source_column:
-            cursor.execute('SELECT 0 as count')
-        else:
-            cursor.execute('SELECT COUNT(*) as count FROM incidents WHERE is_active = 0 AND source = ?', (source_filter,))
-        total += cursor.fetchone()['count']
-    conn.close()
-
-    # Also query archive database(s) if date is specified and archive exists
-    if date:
-        archive_dbs = _get_archive_dbs_for_date(date)
-        for archive_path in archive_dbs:
-            try:
-                archive_conn = _archive_db_connect(archive_path, row_factory=True)
-                archive_cursor = archive_conn.cursor()
-                bounds = _central_date_bounds_utc(date)
-                if bounds:
-                    start_utc, end_utc = bounds
-                    if source_filter == 'all':
-                        archive_cursor.execute(
-                            'SELECT * FROM incidents WHERE first_seen >= ? AND first_seen < ? ORDER BY first_seen DESC',
-                            (start_utc, end_utc)
-                        )
-                        rows = [dict(row) for row in archive_cursor.fetchall()]
-                        archive_cursor.execute(
-                            'SELECT COUNT(*) as count FROM incidents WHERE first_seen >= ? AND first_seen < ?',
-                            (start_utc, end_utc)
-                        )
-                        count_row = archive_cursor.fetchone()
-                        total += int(count_row['count']) if count_row else 0
-                    else:
-                        source_sql = "source = ?" if source_filter != 'caddo' else "(source = 'caddo' OR source IS NULL OR TRIM(source) = '')"
-                        source_args = (source_filter,) if source_filter != 'caddo' else tuple()
-                        try:
-                            archive_cursor.execute(
-                                f'SELECT * FROM incidents WHERE first_seen >= ? AND first_seen < ? AND {source_sql} ORDER BY first_seen DESC',
-                                (start_utc, end_utc, *source_args)
-                            )
-                            rows = [dict(row) for row in archive_cursor.fetchall()]
-                            archive_cursor.execute(
-                                f'SELECT COUNT(*) as count FROM incidents WHERE first_seen >= ? AND first_seen < ? AND {source_sql}',
-                                (start_utc, end_utc, *source_args)
-                            )
-                            count_row = archive_cursor.fetchone()
-                            total += int(count_row['count']) if count_row else 0
-                        except sqlite3.OperationalError:
-                            # Legacy archives without source column are Caddo-only.
-                            if source_filter != 'caddo':
-                                rows = []
-                            else:
-                                archive_cursor.execute(
-                                    'SELECT * FROM incidents WHERE first_seen >= ? AND first_seen < ? ORDER BY first_seen DESC',
-                                    (start_utc, end_utc)
-                                )
-                                rows = [dict(row) for row in archive_cursor.fetchall()]
-                                archive_cursor.execute(
-                                    'SELECT COUNT(*) as count FROM incidents WHERE first_seen >= ? AND first_seen < ?',
-                                    (start_utc, end_utc)
-                                )
-                                count_row = archive_cursor.fetchone()
-                                total += int(count_row['count']) if count_row else 0
-                    all_incidents.extend(rows)
+    for archive_path in _get_archive_dbs_for_date(date):
+        archive_conn = None
+        try:
+            archive_conn = _archive_db_connect(archive_path, row_factory=True)
+            rows, count = _query_history_candidates(
+                archive_conn, bounds, source_filter, candidate_limit, archived=True,
+            )
+            all_incidents.extend(rows)
+            total += count
+        except sqlite3.Error as error:
+            log(f'[ARCHIVE] Error reading {archive_path}: {error}')
+            # A partial page would falsely tell the UI that the missing calls do not exist.
+            return jsonify({'error': 'History is temporarily unavailable. Please retry.'}), 503
+        finally:
+            if archive_conn is not None:
                 archive_conn.close()
-            except Exception as e:
-                log(f"[ARCHIVE] Error reading {archive_path}: {e}")
 
-    for incident in all_incidents:
-        incident['source'] = _normalize_incident_source_for_read(incident.get('source'))
-
-    # Sort all incidents by first_seen descending, then apply pagination
-    all_incidents.sort(key=lambda x: x.get('first_seen') or '', reverse=True)
+    # IDs resolve equal timestamps consistently so pagination does not shuffle.
+    all_incidents.sort(key=lambda item: (item.get('first_seen') or '', item.get('id') or 0), reverse=True)
     paginated = all_incidents[offset:offset + limit]
-
+    for incident in paginated:
+        incident['source'] = _normalize_incident_source_for_read(incident.get('source'))
     return jsonify({'incidents': paginated, 'total': total})
 
 @app.route('/api/incidents/history_counts')
