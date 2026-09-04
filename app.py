@@ -809,8 +809,34 @@ def _set_history_ui_cookie(response):
     return response
 
 
+def _carto_basemap_key():
+    key = _env_setting('LOUISIANA911_CARTO_BASEMAP_KEY', 'CARTO_BASEMAP_API_KEY').strip()
+    if key:
+        return key
+    try:
+        with open(os.path.join(app.instance_path, 'basemaps.json'), encoding='utf-8') as config_file:
+            value = json.load(config_file).get('cartoKey', '')
+            return value.strip() if isinstance(value, str) else ''
+    except (OSError, ValueError, AttributeError):
+        return ''
+
+
+def _read_map_index_html():
+    index_path = os.path.join(app.root_path, 'public', 'index.html')
+    with open(index_path, 'r', encoding='utf-8') as index_file:
+        index_html = index_file.read()
+    # Browser basemap keys are intentionally public; keep deployment config out of git.
+    key = _carto_basemap_key()
+    config = json.dumps({'cartoKey': key}, ensure_ascii=True).replace('<', '\\u003c')
+    return index_html.replace(
+        '<script type="application/json" id="map-config">{}</script>',
+        f'<script type="application/json" id="map-config">{config}</script>',
+        1,
+    )
+
+
 def _serve_index_with_history_ui_session():
-    response = send_from_directory('public', 'index.html')
+    response = app.response_class(_read_map_index_html(), mimetype='text/html')
     if _is_ui_document_navigation():
         _set_history_ui_cookie(response)
     response.headers['Cache-Control'] = 'no-store, private'
@@ -900,9 +926,7 @@ def _serve_shared_incident_page(incident: dict):
     page_title = f'{status_label}: {description} | Louisiana911'
     page_description = f'{summary_lead}: {description} near {location}. Public feed details may change.'
 
-    index_path = os.path.join(app.root_path, 'public', 'index.html')
-    with open(index_path, 'r', encoding='utf-8') as index_file:
-        index_html = index_file.read()
+    index_html = _read_map_index_html()
 
     # The main shell historically uses root-relative and document-relative
     # assets. Anchor document-relative URLs at / when it is served from the
@@ -1152,7 +1176,8 @@ geocode_intersection_cache = {}
 # discriminators; version 5 added validated NOPD block/intersection fallbacks;
 # version 6 adds Baton Rouge address-range and corridor normalization plus
 # official City-Parish traffic-map point enrichment.
-GEOCODER_VERSION = 6
+# Version 7 recognizes Cove/Cv when validating provider road names.
+GEOCODER_VERSION = 7
 ARCGIS_INTERSECTION_MIN_SCORE = 90.0
 ARCGIS_STREET_MIN_SCORE = 85.0
 ARCGIS_ADDRESS_MIN_SCORE = 90.0
@@ -1160,7 +1185,7 @@ MAX_STREET_SEGMENT_METERS = 8000.0
 
 ROAD_TYPE_TOKENS = {
     "ALY", "ALLEY", "AV", "AVE", "AVENUE", "BLVD", "BOULEVARD",
-    "CIR", "CIRCLE", "CT", "COURT", "DR", "DRIVE", "EXPY", "EXPRESSWAY",
+    "CIR", "CIRCLE", "CV", "COVE", "CT", "COURT", "DR", "DRIVE", "EXPY", "EXPRESSWAY",
     "FWY", "FREEWAY", "HWY", "HIGHWAY", "LN", "LANE", "LOOP", "PASSWAY",
     "PKWY", "PARKWAY", "PL", "PLACE", "RD", "ROAD", "ST", "STREET",
     "TER", "TERRACE", "TRL", "TRAIL", "WAY",
@@ -1263,7 +1288,7 @@ GENERIC_CROSS_TOKENS = {
 
 CAD_ROAD_DISAMBIGUATOR_TYPES = {
     "ALY", "ALLEY", "AV", "AVE", "AVENUE", "BLVD", "BOULEVARD",
-    "CIR", "CIRCLE", "CT", "COURT", "DR", "DRIVE", "LN", "LANE",
+    "CIR", "CIRCLE", "CV", "COVE", "CT", "COURT", "DR", "DRIVE", "LN", "LANE",
     "LOOP", "PASSWAY", "PKWY", "PARKWAY", "PL", "PLACE", "RD", "ROAD",
     "ST", "STREET", "TER", "TERRACE", "TRL", "TRAIL", "WAY",
 }

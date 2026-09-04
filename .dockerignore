@@ -15,6 +15,10 @@ env/
 caddo911.db
 caddo911.db-*
 data/
+instance/
+.env
+.env.*
+*.env
 
 # OS/editor noise
 Thumbs.db
