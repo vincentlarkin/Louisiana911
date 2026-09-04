@@ -32,6 +32,7 @@ from sources import caddo as caddo_source
 from sources import lafayette as lafayette_source
 from sources import batonrouge as batonrouge_source
 from sources import neworleans as neworleans_source
+from sources import lakecharles as lakecharles_source
 from sources import neworleans_archive as neworleans_archive_source
 
 app = Flask(__name__, static_folder='public', static_url_path='')
@@ -304,6 +305,7 @@ feed_refreshed_by_source: dict[str, str | None] = {
     "lafayette": None,
     "batonrouge": None,
     "neworleans": None,
+    "lakecharles": None,
 }
 last_scrape_started_at: str | None = None  # ISO UTC
 last_scrape_finished_at: str | None = None  # ISO UTC
@@ -929,7 +931,10 @@ def _serve_shared_incident_page(incident: dict):
     units = int(payload.get('units') or 0)
     is_active = bool(payload.get('is_active'))
 
-    if is_active and units >= 5:
+    if payload.get('source') == 'lakecharles':
+        status_label = 'CLOSED POLICE CALL'
+        summary_lead = 'Lake Charles police call published with a 24-hour delay'
+    elif is_active and units >= 5:
         status_label = 'BREAKING - VERY ACTIVE'
         summary_lead = f'Very active public incident with {units} assigned units'
     elif is_active:
@@ -1370,6 +1375,14 @@ SOURCE_MUNICIPALITY_ALIASES = {
 
 # Source geocode profiles (bounds + fallback center).
 SOURCE_GEO_PROFILES = {
+    "lakecharles": {
+        "lat_min": 30.0, "lat_max": 30.45,
+        "lon_min": -93.4, "lon_max": -92.95,
+        "center_lat": 30.2266, "center_lon": -93.2174,
+        "default_city": "Lake Charles", "county": "Calcasieu Parish",
+        # Census QuickFacts 2020 land area; not a claim of complete CAD coverage.
+        "area_sq_miles": 45.65,
+    },
     "caddo": {
         "lat_min": 32.10,
         "lat_max": 33.05,
@@ -2327,6 +2340,15 @@ def scrape_neworleans_incidents():
         return [], None
 
 
+def scrape_lakecharles_incidents():
+    """Import only the anonymous site's published, delayed LCPD closed calls."""
+    try:
+        return lakecharles_source.scrape(user_agent=SCRAPER_USER_AGENT, timeout_seconds=20)
+    except Exception as error:
+        log(f"Lake Charles import unavailable: {error}")
+        return [], None
+
+
 # Backwards compatibility for any old call sites.
 def scrape_incidents():
     return scrape_caddo_incidents()
@@ -2339,6 +2361,7 @@ SOURCE_MIN_SCRAPE_INTERVAL_SECONDS = {
     # Data.NOLA publishes this dataset in daily batches. Polling it every live
     # feed cycle would create load without making the site any fresher.
     'neworleans': 15 * 60,
+    'lakecharles': 30 * 60,
 }
 
 
@@ -2443,6 +2466,15 @@ def _incident_geocode_result(incident: dict, source_name: str) -> dict:
                 if is_approximate
                 else 'Official source coordinates'
             ),
+            'provider_responded': True,
+        }
+
+    if source_name == 'lakecharles':
+        # Respect withheld/missing public coordinates. No private-address or
+        # city-center fallback for this generalized closed-call dataset.
+        return {
+            'lat': None, 'lng': None, 'source': 'source-feed-unmapped',
+            'quality': 'location-unavailable', 'query': None,
             'provider_responded': True,
         }
 
@@ -2676,7 +2708,7 @@ def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: b
                 )
             except (TypeError, ValueError):
                 has_source_point = False
-            if has_source_point:
+            if has_source_point or incident_source == 'lakecharles':
                 current_geo = _collector_geocode_result(conn, incident, incident_source)
                 cursor.execute(
                     '''UPDATE incidents
@@ -2827,7 +2859,7 @@ def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: b
                         now,
                         desired_active,
                     ))
-            if incident_source != 'neworleans':
+            if incident_source not in ('neworleans', 'lakecharles'):
                 log(f"New incident: {incident['description']} at {incident['street'] or incident['cross_streets']}")
 
     if deactivate_missing:
@@ -2880,6 +2912,7 @@ def background_scrape():
         ('batonrouge', 'Baton Rouge Traffic', scrape_batonrouge_incidents),
         ('lafayette', 'Lafayette 911', scrape_lafayette_incidents),
         ('neworleans', 'New Orleans daily calls for service', scrape_neworleans_incidents),
+        ('lakecharles', 'Lake Charles closed police calls (24-hour delay)', scrape_lakecharles_incidents),
     ]
     for source_name, label, scraper in source_jobs:
         min_interval = SOURCE_MIN_SCRAPE_INTERVAL_SECONDS.get(source_name, 0)
@@ -2905,7 +2938,7 @@ def background_scrape():
     meta_set('last_scrape_finished_at', last_scrape_finished_at)
 
 
-VALID_SOURCES = {'caddo', 'lafayette', 'batonrouge', 'neworleans'}
+VALID_SOURCES = {'caddo', 'lafayette', 'batonrouge', 'neworleans', 'lakecharles'}
 
 
 def _normalize_source_filter(value: str | None) -> str:
@@ -4062,6 +4095,17 @@ def get_active_incidents():
         else:
             cursor.execute('SELECT * FROM incidents WHERE is_active = 1 AND source = ? ORDER BY time DESC', (source_filter,))
         incidents = [dict(row) for row in cursor.fetchall()]
+        if has_source_column and source_filter in ('all', 'lakecharles'):
+            # Latest includes a bounded recent slice of closed calls. Keep
+            # is_active=0 so they are never counted as active and are available
+            # in History immediately, under their original call date.
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=lakecharles_source.RECENT_DAYS)).isoformat()
+            cursor.execute(
+                "SELECT * FROM incidents WHERE source = 'lakecharles' AND is_active = 0 "
+                "AND first_seen >= ? ORDER BY first_seen DESC, id DESC LIMIT ?",
+                (cutoff, lakecharles_source.RECENT_LIMIT),
+            )
+            incidents.extend(dict(row) for row in cursor.fetchall())
     except sqlite3.OperationalError:
         cursor.execute('SELECT * FROM incidents WHERE is_active = 1 ORDER BY time DESC')
         incidents = [dict(row) for row in cursor.fetchall()]
@@ -4526,6 +4570,7 @@ def get_status():
         'feed_refreshed_at_lafayette',
         'feed_refreshed_at_batonrouge',
         'feed_refreshed_at_neworleans',
+        'feed_refreshed_at_lakecharles',
         'last_scrape_started_at',
         'last_scrape_finished_at',
         'scrape_interval_seconds',
@@ -4544,6 +4589,7 @@ def get_status():
         'lafayette': meta.get('feed_refreshed_at_lafayette') or feed_refreshed_by_source.get('lafayette'),
         'batonrouge': meta.get('feed_refreshed_at_batonrouge') or feed_refreshed_by_source.get('batonrouge'),
         'neworleans': meta.get('feed_refreshed_at_neworleans') or feed_refreshed_by_source.get('neworleans'),
+        'lakecharles': meta.get('feed_refreshed_at_lakecharles') or feed_refreshed_by_source.get('lakecharles'),
     }
 
     return jsonify({
@@ -4851,6 +4897,11 @@ def run_regeocode(*, dry_run: bool = False, limit: int | None = None) -> None:
             # Get new geocode. New Orleans needs the same public block-mask,
             # intersection, and Approx Loc handling used during normal imports.
             row_source = _normalize_source_name(row_dict.get('source') or 'caddo')
+            if row_source == 'lakecharles':
+                # The importer alone maintains published Lake Charles points;
+                # a maintenance geocode pass must not resolve withheld points.
+                skipped += 1
+                continue
             if row_source == 'neworleans':
                 nola_probe = dict(row_dict)
                 nola_probe['latitude'] = None

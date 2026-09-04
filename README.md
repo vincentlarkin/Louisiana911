@@ -25,6 +25,7 @@ Current sources include:
 - [City of Baton Rouge traffic incidents](https://city.brla.gov/traffic/incidents.asp)
 - [Lafayette Parish traffic feed](https://lafayette911.org/wp-json/traffic-feed/v1/data)
 - [City of New Orleans / NOPD Calls for Service](https://data.nola.gov/resource/es9j-6y5d.json)
+- [Lake Charles Police-to-Citizen closed calls](https://lakecharles.policetocitizen.com/cadcalls) — LCPD traffic, crime-related and service calls; 24-hour publication delay.
 
 New Orleans information is published as a delayed daily record rather than a live feed. Source agencies may update, reclassify, delay, or remove records. Some locations are approximate, generalized, or unavailable.
 
