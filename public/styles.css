@@ -295,7 +295,7 @@
     
     .main-container {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 380px;
+      grid-template-columns: minmax(0, 1fr) 400px;
       height: calc(100vh - var(--header-height));
       height: calc(100dvh - var(--header-height));
       min-height: 0;
@@ -303,9 +303,12 @@
 
     body.list-view .main-container {
       grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
     }
     
     .map-container {
+      min-width: 0;
+      min-height: 0;
       position: relative;
       background: var(--bg-panel);
     }
@@ -335,8 +338,8 @@
     }
 
     .basemap-option {
-      min-height: 30px;
-      padding: 0 10px;
+      min-height: 36px;
+      padding: 0 12px;
       border: 1px solid transparent;
       border-radius: 6px;
       background: transparent;
@@ -410,7 +413,7 @@
     
     .map-overlay {
       background: rgba(16, 17, 23, 0.94);
-      padding: 13px 16px;
+      padding: 16px 18px;
       border-radius: 9px;
       border: 1px solid var(--border);
       box-shadow: 0 10px 30px rgba(0,0,0,0.34);
@@ -549,6 +552,8 @@
     }
     
     .sidebar {
+      min-width: 0;
+      min-height: 0;
       background: var(--bg-panel);
       border-left: 1px solid var(--border);
       display: flex;
@@ -807,30 +812,12 @@
       );
     }
 
-    .incident-card.sev-medical {
-      background-image:
-        linear-gradient(180deg, rgba(255, 59, 59, 0.05), rgba(255, 59, 59, 0.015)),
-        repeating-linear-gradient(
-          135deg,
-          rgba(255, 255, 255, 0.04) 0 10px,
-          rgba(255, 59, 59, 0.08) 10px 20px
-        );
+    .incident-card.sev-medical,
+    .incident-card.sev-custody {
       background-color: var(--bg-card);
       border-color: rgba(255, 255, 255, 0.12);
     }
 
-    .incident-card.sev-custody {
-      background-image:
-        linear-gradient(180deg, rgba(154, 160, 170, 0.08), rgba(154, 160, 170, 0.02)),
-        repeating-linear-gradient(
-          135deg,
-          rgba(255, 255, 255, 0.05) 0 12px,
-          rgba(154, 160, 170, 0.10) 12px 24px
-        );
-      background-color: var(--bg-card);
-      border-color: rgba(154, 160, 170, 0.2);
-    }
-    
     .incident-card.is-actionable:hover {
       border-color: var(--border-strong);
       background-color: var(--bg-hover);
@@ -860,6 +847,8 @@
     }
     
     .incident-type {
+      min-width: 0;
+      overflow-wrap: anywhere;
       font-size: 13px;
       font-weight: 600;
       color: var(--text);
@@ -877,6 +866,7 @@
     }
     
     .incident-location {
+      overflow-wrap: anywhere;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -901,7 +891,8 @@
 
     .incident-meta {
       display: flex;
-      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
       align-items: center;
     }
     
@@ -937,6 +928,10 @@
     }
     
     .incident-units {
+      flex: 1 1 120px;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      line-height: 1.5;
       font-family: 'JetBrains Mono', monospace;
       font-size: 10px;
       color: var(--text-dim);
@@ -948,7 +943,8 @@
       gap: 5px;
       flex: 0 0 auto;
       margin-left: auto;
-      padding: 4px 7px;
+      min-height: 30px;
+      padding: 5px 8px;
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 7px;
       background: rgba(255, 255, 255, 0.035);
@@ -1047,7 +1043,7 @@
 
       body.list-view .incident-card {
         display: grid;
-        grid-template-columns: minmax(220px, 1.15fr) 86px minmax(240px, 1fr) minmax(220px, 0.95fr);
+        grid-template-columns: minmax(0, 1fr) 54px minmax(0, 1.2fr) minmax(0, 1.1fr);
         gap: 12px;
         align-items: center;
         min-height: 54px;
@@ -1516,6 +1512,8 @@
     }
     
     .settings-modal .settings-dialog {
+      max-height: calc(100dvh - 32px);
+      overflow-y: auto;
       position: relative;
       width: min(420px, 90vw);
       background: linear-gradient(180deg, rgba(18, 18, 26, 0.98), rgba(18, 18, 26, 0.95));
@@ -2907,6 +2905,20 @@
       animation: unit-count-ring-pulse 1.35s cubic-bezier(0.2, 0.65, 0.35, 1) infinite;
     }
 
+    .incident-unit-pulse-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      background: transparent;
+      border: 0;
+    }
+
+    .incident-unit-pulse-icon svg {
+      overflow: visible;
+      flex-shrink: 0;
+    }
+
     @keyframes unit-count-ring-pulse {
       0% { transform: scale(0.86); opacity: 0.82; }
       72%, 100% { transform: scale(1.42); opacity: 0; }
@@ -3042,45 +3054,65 @@
       }
     }
 
-    /* Keep map tile rendering lightweight for smooth pan/zoom. */
-    .leaflet-labels-pane .leaflet-tile {
-      filter: none;
-      opacity: 1;
-    }
-
+    /* Both appearances retain the full street network and labels. */
     .leaflet-base-pane .leaflet-tile {
-      filter: brightness(42%) contrast(115%);
+      filter: none;
     }
 
-    #map[data-basemap-mode="detailed"] .leaflet-base-pane .leaflet-tile {
-      filter: invert(100%) hue-rotate(180deg) brightness(72%) contrast(92%) saturate(70%);
+    #map[data-basemap-mode="dark"][data-basemap-provider="osm"] .leaflet-base-pane .leaflet-tile {
+      filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%) saturate(0%);
     }
 
     .leaflet-incident-pane {
       z-index: 675;
     }
 
-    .incident-centroid-marker {
+    .incident-map-marker {
+      display: grid;
+      place-items: center;
       border: 0;
+      border-radius: 50%;
       background: transparent;
-      pointer-events: none !important;
     }
 
-    .incident-triangle-symbol {
-      display: block;
-      width: 100%;
-      height: 100%;
-      overflow: visible;
-      transform-origin: 50% 50%;
-      filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.95));
+    .incident-map-marker:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 1px;
     }
-    
+
+    .incident-circle-symbol {
+      display: block;
+      overflow: visible;
+      filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+    }
+
     /* Prevent background scroll when modal is open */
     body.modal-open {
       overflow: hidden;
     }
     
     /* Responsive */
+    @media (min-width: 721px) and (max-width: 1100px) {
+      .header { gap: 16px; padding: 12px 16px; }
+      .status-bar { gap: 8px; }
+      .status-item.status-live { display: none; }
+      .status-value { white-space: nowrap; }
+      .location-btn { min-width: 34px; width: 34px; padding: 0; }
+      .location-label { display: none; }
+
+      body.list-view .incident-card {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px 16px;
+        padding: 14px 16px;
+      }
+      body.list-view .incident-time { justify-self: end; }
+      body.list-view .incident-location,
+      body.list-view .incident-meta { grid-column: 1 / -1; }
+      body.list-view .incident-location,
+      body.list-view .incident-units { white-space: normal; overflow: visible; }
+    }
+
+
     @media (max-width: 900px) {
       .info-modal .modal-dialog {
         width: min(92vw, 680px);
@@ -3141,8 +3173,12 @@
         height: calc(100dvh - var(--header-height));
       }
 
-      .map-container {
-        height: 100%;
+      body:not(.list-view) .map-container {
+        height: calc(100% - 56px - env(safe-area-inset-bottom));
+      }
+
+      body.mobile-incidents-open:not(.list-view) .map-container {
+        height: calc(100% - min(50dvh, 460px));
       }
 
       .basemap-switcher {
@@ -3155,8 +3191,8 @@
         left: 0;
         right: 0;
         bottom: 0;
-        height: min(50vh, 460px);
-        max-height: 60vh;
+        height: min(50dvh, 460px);
+        max-height: 60dvh;
         border-left: none;
         border-top: 1px solid var(--border);
         border-radius: 12px 12px 0 0;
@@ -3168,7 +3204,7 @@
       }
 
       .sidebar.collapsed {
-        height: 56px;
+        height: calc(56px + env(safe-area-inset-bottom));
       }
 
       .sidebar.collapsed .filter-bar,
@@ -3226,8 +3262,8 @@
       }
 
       .header {
-        height: var(--header-height);
-        min-height: var(--header-height);
+        height: auto;
+        min-height: calc(114px + env(safe-area-inset-top));
         padding:
           calc(8px + env(safe-area-inset-top))
           max(12px, env(safe-area-inset-right))
@@ -3411,12 +3447,12 @@
       }
 
       .incident-list {
-        padding: 7px;
+        padding: 10px;
       }
 
       .incident-card {
-        padding: 10px 10px 10px 13px;
-        margin-bottom: 6px;
+        padding: 14px 12px 14px 16px;
+        margin-bottom: 8px;
       }
 
       .incident-header {
@@ -3424,7 +3460,7 @@
       }
 
       .incident-type {
-        font-size: 12px;
+        font-size: 13px;
       }
 
       .incident-time {
@@ -3433,8 +3469,8 @@
       }
 
       .incident-location {
-        font-size: 10px;
-        margin-bottom: 4px;
+        font-size: 12px;
+        margin-bottom: 10px;
       }
 
       .incident-agency {
@@ -3497,3 +3533,14 @@
       }
     }
   
+
+    @media (max-width: 360px) {
+      .status-item.status-update { display: none; }
+      .status-bar { justify-content: space-between; }
+      .settings-btn { margin-left: 0; }
+    }
+
+    .toggle-switch input:focus-visible + .toggle-slider {
+      outline: 2px solid var(--blue);
+      outline-offset: 3px;
+    }

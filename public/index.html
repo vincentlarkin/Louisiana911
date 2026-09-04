@@ -3,6 +3,7 @@
 <head>
   <script defer src="/analytics.js?v=4.3.0"></script>
   <meta charset="UTF-8">
+  <script type="application/json" id="map-config">{}</script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Louisiana 911 Calls &amp; Caddo 911 Live Map | Louisiana911</title>
   <meta name="description" content="View Louisiana 911 public incident feeds on one map, including live Caddo 911 calls, Baton Rouge and Lafayette traffic incidents, and daily NOPD calls.">
@@ -12,7 +13,7 @@
   <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
   <link rel="icon" href="/favicon-96x96.png" sizes="96x96" type="image/png">
   <link rel="apple-touch-icon" href="/images/louisiana911-icon-192.png" sizes="192x192">
-  <link rel="manifest" href="/manifest.webmanifest?v=4.3.6">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.4.1">
   <meta name="theme-color" content="#0a0a0f">
   <meta name="color-scheme" content="dark">
   <meta name="application-name" content="Louisiana911">
@@ -80,8 +81,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.3.6" />
+  <link rel="stylesheet" href="styles.css?v=4.4.1" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -134,6 +136,16 @@
       <button class="modal-close" type="button" aria-label="Close" id="settings-close">×</button>
       <div class="settings-content">
         <h3>Settings</h3>
+        <div class="setting-item">
+          <label class="setting-label" for="setting-circle-markers">
+            <span class="setting-title">Circle markers</span>
+            <span class="setting-desc">Use circles instead of transparent triangles. Incidents with 5 or more units pulse in either style.</span>
+          </label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="setting-circle-markers">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
         <div class="setting-item">
           <label class="setting-label" for="setting-show-all-history">
             <span class="setting-title">Show all incidents on History map</span>
@@ -216,7 +228,7 @@
           </a>
         </div>
         <p class="info-credit">Made by <a class="info-credit-link" href="mailto:vincent@vincentlarkin.com">Vincent Larkin</a></p>
-        <p class="info-version">v4.3.6</p>
+        <p class="info-version">v4.4.1</p>
       </div>
     </div>
   </div>
@@ -263,9 +275,9 @@
   <main class="main-container">
     <div class="map-container">
       <div id="map"></div>
-      <div class="basemap-switcher" role="group" aria-label="Map detail">
-        <button class="basemap-option" type="button" data-basemap="clean" aria-pressed="true">Clean</button>
-        <button class="basemap-option" type="button" data-basemap="detailed" aria-pressed="false">Detailed</button>
+      <div class="basemap-switcher" role="group" aria-label="Street map appearance">
+        <button class="basemap-option" type="button" data-basemap="dark" aria-pressed="true">Dark streets</button>
+        <button class="basemap-option" type="button" data-basemap="light" aria-pressed="false">Light streets</button>
       </div>
       <div class="legend-container" id="legend-container">
         <div class="map-overlay" id="map-legend">
@@ -310,7 +322,7 @@
               <div class="legend-dot legend-dot-custody"></div>
               <span>Custody / prisoner</span>
             </div>
-            <p class="legend-note">Colors indicate severity. Dashed markers use approximate public locations.</p>
+            <p class="legend-note">Colors indicate severity. Larger, dashed markers show less precise locations. Markers are not exact boundaries.</p>
           </div>
         </div>
       </div>
@@ -450,8 +462,16 @@
   </main>
   
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.3/leaflet-maplibre-gl.js"></script>
   <script>
-    const storedViewMode = localStorage.getItem('louisiana911ViewMode') || localStorage.getItem('caddo911ViewMode');
+    const preferences = {
+      get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+      set(key, value) { try { localStorage.setItem(key, value); } catch { /* Optional persistence. */ } },
+    };
+    // Preserve explicit choices from the previous toggle; new visitors get triangles.
+    let triangleMarkers = preferences.get('louisiana911TriangleMarkers') !== 'false';
+    const storedViewMode = preferences.get('louisiana911ViewMode') || preferences.get('caddo911ViewMode');
     const firstVisitMobileView = window.matchMedia('(max-width: 720px)').matches ? 'list' : 'map';
     let viewMode = storedViewMode === 'list' || storedViewMode === 'map'
       ? storedViewMode
@@ -468,10 +488,7 @@
       zoomAnimation: false,
       markerZoomAnimation: false
     }).setView([32.5252, -93.7502], 11);
-    const markerRenderer = L.canvas({ padding: 0.5, pane: 'incident' });
-    const medicalMarkerRenderer = L.svg({ padding: 0.5, pane: 'incident' });
-    const unitPulseRenderer = L.svg({ padding: 0.5, pane: 'unitPulse' });
-    const MEDICAL_MARKER_PATTERN_ID = 'medical-marker-stripes';
+    map.attributionControl.setPrefix('<a href="https://leafletjs.com" title="A JavaScript library for interactive maps">Leaflet</a>');
     const UNIT_PULSE_THRESHOLD = 5;
     
     // Keep view constrained to a few-state window around Louisiana/Texas/Arkansas
@@ -479,16 +496,10 @@
     const northEast = L.latLng(34.5, -88.5);
     map.setMaxBounds(L.latLngBounds(southWest, northEast));
     
-    // Minimal dark canvas with a separate sparse-label overlay, matching the
-    // original low-detail map while avoiding CARTO's API-key watermark.
+    // Keep the basemap beneath the incident and boundary overlays.
     map.createPane('base');
     map.getPane('base').classList.add('leaflet-base-pane');
     map.getPane('base').style.zIndex = 200;
-
-    map.createPane('labels');
-    map.getPane('labels').classList.add('leaflet-labels-pane');
-    map.getPane('labels').style.zIndex = 650;
-    map.getPane('labels').style.pointerEvents = 'none';
 
     map.createPane('incident');
     map.getPane('incident').classList.add('leaflet-incident-pane');
@@ -504,42 +515,148 @@
     map.getPane('unitPulse').style.zIndex = 575;
     map.getPane('unitPulse').style.pointerEvents = 'none';
 
-    const cleanBaseTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-      pane: 'base',
-      attribution: 'Tiles &copy; Esri &mdash; Sources: Esri, HERE, Garmin, &copy; OpenStreetMap contributors, and the GIS User Community',
-      maxNativeZoom: 16,
-      maxZoom: 19
-    });
-
-    const cleanLabelTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
-      pane: 'labels',
-      maxNativeZoom: 16,
-      maxZoom: 19,
-      opacity: 1
-    });
-
-    const detailedTileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    const streetTileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       pane: 'base',
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19
     });
 
+    const mapConfig = JSON.parse(document.getElementById('map-config')?.textContent || '{}');
+    const cartoKey = String(mapConfig.cartoKey || '').trim();
+    const cartoAttribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+    const cartoLayers = cartoKey ? {
+      dark: L.tileLayer(`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(cartoKey)}`, {
+        pane: 'base', attribution: cartoAttribution, subdomains: 'abcd', maxZoom: 19,
+      }),
+      light: L.tileLayer(`https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(cartoKey)}`, {
+        pane: 'base', attribution: cartoAttribution, subdomains: 'abcd', maxZoom: 19,
+      }),
+    } : null;
+
     const basemapButtons = Array.from(document.querySelectorAll('[data-basemap]'));
-    const storedBasemapMode = localStorage.getItem('louisiana911BasemapMode');
-    let basemapMode = storedBasemapMode === 'detailed' ? 'detailed' : 'clean';
+    const storedBasemapMode = preferences.get('louisiana911BasemapMode');
+    let basemapMode = storedBasemapMode === 'light' ? 'light' : 'dark';
+    const vectorStyles = {
+      dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+      light: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+    };
+    let vectorLayer = null;
+    let vectorMode = null;
+    let vectorFailed = false;
+    let vectorLoadTimer = null;
+
+    function cartoRequest(url) {
+      const requestUrl = new URL(url);
+      if (cartoKey && requestUrl.protocol === 'https:' &&
+          (requestUrl.hostname === 'cartocdn.com' || requestUrl.hostname.endsWith('.cartocdn.com'))) {
+        requestUrl.searchParams.set('key', cartoKey);
+      }
+      return { url: requestUrl.href };
+    }
+
+    function fallBackToRaster() {
+      if (vectorFailed) return;
+      vectorFailed = true;
+      clearTimeout(vectorLoadTimer);
+      // Defer removal until MapLibre finishes dispatching its current event.
+      queueMicrotask(() => {
+        if (vectorLayer && map.hasLayer(vectorLayer)) {
+          // The adapter assumes WebGL initialized successfully during removal.
+          if (!vectorLayer.getMaplibreMap()) {
+            const container = vectorLayer.getContainer();
+            vectorLayer.onRemove = () => container?.remove();
+          }
+          map.removeLayer(vectorLayer);
+        }
+        vectorLayer = null;
+        setBasemapMode(basemapMode, { persist: false });
+      });
+    }
+
+    function improveStreetLabels(renderer, mode) {
+      // MapLibre's 512px zoom is one below Leaflet's 256px zoom. Show local
+      // streets when an incident is selected at Leaflet zoom 15.
+      const minimumZooms = { roadname_minor: 14, roadname_sec: 14, roadname_pri: 13, roadname_major: 12 };
+      for (const [id, minZoom] of Object.entries(minimumZooms)) {
+        if (!renderer.getLayer(id)) continue;
+        renderer.setLayerZoomRange(id, minZoom, 24);
+        renderer.setLayoutProperty(id, 'text-size', ['interpolate', ['linear'], ['zoom'], 12, 10, 14, 11, 17, 12]);
+        renderer.setPaintProperty(id, 'text-color', mode === 'dark' ? '#bdc5cf' : '#525c69');
+        renderer.setLayoutProperty(id, 'symbol-spacing', 400);
+      }
+    }
+
+    function softenBasemapDetails(renderer, mode) {
+      const dark = mode === 'dark';
+      // Let incidents stand out over the city grid. Local road detail returns
+      // gradually at street level; labels remain independent of road opacity.
+      for (const layer of renderer.getStyle().layers) {
+        const id = layer.id;
+        if (layer.type === 'line' && /^(road|bridge|tunnel)_(minor|service|path)/.test(id)) {
+          renderer.setPaintProperty(id, 'line-opacity', [
+            'interpolate', ['linear'], ['zoom'], 12, dark ? 0.28 : 0.5, 14, 0.42, 16, 0.8, 18, 1,
+          ]);
+          if (dark) renderer.setPaintProperty(id, 'line-color', '#343b46');
+        } else if (layer.type === 'line' && /^(road|bridge|tunnel)_sec/.test(id)) {
+          renderer.setPaintProperty(id, 'line-opacity', [
+            'interpolate', ['linear'], ['zoom'], 11, 0.55, 14, 0.7, 16, 1,
+          ]);
+        } else if (layer.type === 'fill' && layer['source-layer'] === 'building') {
+          renderer.setPaintProperty(id, 'fill-opacity', [
+            'interpolate', ['linear'], ['zoom'], 14, 0, 16, 0.45, 18, 0.7,
+          ]);
+        } else if (layer.type === 'line' && (id === 'waterway' || /rail/.test(id))) {
+          renderer.setPaintProperty(id, 'line-opacity', 0.4);
+        } else if (layer.type === 'symbol' && /^(place_suburbs|place_hamlet|waterway_label|watername_lake)/.test(id)) {
+          renderer.setPaintProperty(id, 'text-opacity', 0.6);
+        }
+      }
+      if (dark && renderer.getLayer('water')) renderer.setPaintProperty('water', 'fill-color', '#202830');
+    }
+
+    function showVectorBasemap(mode) {
+      if (!cartoKey || vectorFailed || typeof L.maplibreGL !== 'function') return false;
+      try {
+        if (!vectorLayer) {
+          vectorLayer = L.maplibreGL({
+            pane: 'base', style: vectorStyles[mode], interactive: false,
+            attributionControl: { customAttribution: cartoAttribution },
+            transformRequest: cartoRequest,
+          });
+          vectorLayer.addTo(map);
+          const renderer = vectorLayer.getMaplibreMap();
+          renderer.on('error', fallBackToRaster);
+          renderer.getCanvas().addEventListener('webglcontextlost', fallBackToRaster);
+          renderer.on('style.load', () => {
+            clearTimeout(vectorLoadTimer);
+            improveStreetLabels(renderer, vectorMode);
+            softenBasemapDetails(renderer, vectorMode);
+          });
+        } else if (vectorMode !== mode) {
+          vectorLayer.getMaplibreMap().setStyle(vectorStyles[mode]);
+        } else {
+          return true;
+        }
+        vectorMode = mode;
+        clearTimeout(vectorLoadTimer);
+        vectorLoadTimer = setTimeout(fallBackToRaster, 15000);
+        return true;
+      } catch {
+        fallBackToRaster();
+        return false;
+      }
+    }
 
     function setBasemapMode(mode, { persist = true } = {}) {
-      const nextMode = mode === 'detailed' ? 'detailed' : 'clean';
-      [cleanBaseTileLayer, cleanLabelTileLayer, detailedTileLayer].forEach(layer => {
-        if (map.hasLayer(layer)) map.removeLayer(layer);
+      const nextMode = mode === 'light' ? 'light' : 'dark';
+      basemapMode = nextMode;
+      const useVector = showVectorBasemap(nextMode);
+      const nextLayer = useVector ? vectorLayer : (cartoLayers ? cartoLayers[nextMode] : streetTileLayer);
+      [streetTileLayer, ...Object.values(cartoLayers || {})].forEach(layer => {
+        if (layer !== nextLayer && map.hasLayer(layer)) map.removeLayer(layer);
       });
-
-      if (nextMode === 'detailed') {
-        detailedTileLayer.addTo(map);
-      } else {
-        cleanBaseTileLayer.addTo(map);
-        cleanLabelTileLayer.addTo(map);
-      }
+      if (!map.hasLayer(nextLayer)) nextLayer.addTo(map);
+      map.getContainer().dataset.basemapProvider = useVector ? 'carto-vector' : (cartoLayers ? 'carto' : 'osm');
 
       basemapMode = nextMode;
       map.getContainer().dataset.basemapMode = nextMode;
@@ -548,7 +665,8 @@
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', String(active));
       });
-      if (persist) localStorage.setItem('louisiana911BasemapMode', nextMode);
+      if (parishOutlineLayer) parishOutlineLayer.setStyle(getParishOutlineStyle());
+      if (persist) preferences.set('louisiana911BasemapMode', nextMode);
     }
 
     basemapButtons.forEach(button => {
@@ -564,9 +682,10 @@
     function getParishOutlineStyle() {
       return {
         pane: 'parish',
-        color: 'rgba(232, 232, 240, 0.45)',
-        weight: 2,
-        opacity: 0.95,
+        color: basemapMode === 'light' ? '#596579' : '#c2ccd8',
+        weight: 1,
+        opacity: 0.55,
+        dashArray: '5 6',
         fill: false
       };
     }
@@ -951,7 +1070,7 @@
 
     function buildIncidentListSignature(incidents, keyPrefix = '') {
       const items = Array.isArray(incidents) ? incidents : [];
-      const base = items.map((inc) => `${inc.id}:${inc.time || ''}:${inc.units || ''}:${inc.source || ''}`).join('|');
+      const base = JSON.stringify(items);
       return `${keyPrefix}|${base}`;
     }
     
@@ -1086,44 +1205,6 @@
       if (sev === 'service') return '#00ff88';
       if (sev === 'low') return '#3b8bff';
       return '#ffb830';
-    }
-
-    function getMarkerFill(sev) {
-      if (sev === 'medical') return `url(#${MEDICAL_MARKER_PATTERN_ID})`;
-      return getSeverityColor(sev);
-    }
-
-    function getMarkerRenderer(sev) {
-      return sev === 'medical' ? medicalMarkerRenderer : markerRenderer;
-    }
-
-    function ensureMedicalMarkerStripePattern() {
-      const svg = medicalMarkerRenderer?._container;
-      if (!svg || svg.querySelector(`#${MEDICAL_MARKER_PATTERN_ID}`)) return;
-
-      const svgNs = 'http://www.w3.org/2000/svg';
-      const defs = document.createElementNS(svgNs, 'defs');
-      const pattern = document.createElementNS(svgNs, 'pattern');
-      pattern.setAttribute('id', MEDICAL_MARKER_PATTERN_ID);
-      pattern.setAttribute('patternUnits', 'userSpaceOnUse');
-      pattern.setAttribute('width', '12');
-      pattern.setAttribute('height', '12');
-
-      const base = document.createElementNS(svgNs, 'rect');
-      base.setAttribute('width', '12');
-      base.setAttribute('height', '12');
-      base.setAttribute('fill', '#f1f3f6');
-
-      const stripes = document.createElementNS(svgNs, 'path');
-      stripes.setAttribute('d', 'M -3 12 L 12 -3 M 3 15 L 15 3');
-      stripes.setAttribute('stroke', '#ff3b3b');
-      stripes.setAttribute('stroke-width', '5');
-      stripes.setAttribute('stroke-linecap', 'square');
-
-      pattern.appendChild(base);
-      pattern.appendChild(stripes);
-      defs.appendChild(pattern);
-      svg.insertBefore(defs, svg.firstChild);
     }
 
     const SOURCE_ORDER = ['caddo', 'batonrouge', 'lafayette', 'neworleans'];
@@ -1548,58 +1629,6 @@
       return _stringHash(incident?.hash || incident?.id || '');
     }
 
-    function _triangleLatLngs(lat, lng, sizeMeters, seed) {
-      // Small equilateral-ish triangle around a center point, rotated deterministically.
-      const base = [
-        [0, 1],
-        [-0.866, -0.5],
-        [0.866, -0.5],
-      ];
-      const angle = ((seed % 360) * Math.PI) / 180;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-
-      const latRad = (lat * Math.PI) / 180;
-      const mPerDegLat = 111320;
-      const mPerDegLng = 111320 * Math.cos(latRad);
-
-      return base.map(([x, y]) => {
-        const rx = x * cos - y * sin;
-        const ry = x * sin + y * cos;
-        const dLat = (ry * sizeMeters) / mPerDegLat;
-        const dLng = (rx * sizeMeters) / (mPerDegLng || 1);
-        return [lat + dLat, lng + dLng];
-      });
-    }
-
-    function _geocodeTriangleSizeMeters(incident, mode) {
-      const src = String(incident?.geocode_source || '').toLowerCase();
-      const q = String(incident?.geocode_quality || '').toLowerCase();
-
-      // Defaults: slightly generalized even for "good" geocodes (avoids false precision).
-      let size = mode === 'history' ? 70 : 85;
-
-      if (isApproximateLocation(incident)) {
-        size = mode === 'history' ? 170 : 210;
-      } else if (src === 'fallback' || q === 'fallback' || q === 'city-only') {
-        size = mode === 'history' ? 220 : 260;
-      } else if (q === 'address') {
-        size = mode === 'history' ? 55 : 65;
-      } else if (q === 'cross-only') {
-        size = mode === 'history' ? 160 : 190;
-      } else if (q === 'street-only') {
-        size = mode === 'history' ? 140 : 170;
-      } else if (q === 'street-segment') {
-        size = mode === 'history' ? 90 : 110;
-      } else if (q === 'street+cross') {
-        size = mode === 'history' ? 90 : 110;
-      } else if (q === 'intersection-2') {
-        size = mode === 'history' ? 65 : 80;
-      }
-
-      return size;
-    }
-
     function _markerSymbolSizePixels(incident) {
       const quality = String(incident?.geocode_quality || '').toLowerCase();
       const source = String(incident?.geocode_source || '').toLowerCase();
@@ -1609,28 +1638,30 @@
       return 16;
     }
 
-    function _markerSymbol(incident, severity, seed) {
-      const size = _markerSymbolSizePixels(incident);
+    function markerLabel(incident) {
+      return `${incident.description || 'Incident'} — ${incidentLocationText(incident)}`;
+    }
+
+    function markerIcon(incident) {
+      const severity = getSeverity(incident);
+      const size = _markerSymbolSizePixels(incident) + (triangleMarkers ? 10 : 0);
       const color = getSeverityColor(severity);
-      const rotation = seed % 360;
-      const approximate = isApproximateLocation(incident);
-      const patternId = `medical-symbol-${seed}`;
+      const approximate = isApproximateLocation(incident) || _markerSymbolSizePixels(incident) > 19;
+      const patternId = `medical-symbol-${_incidentSeed(incident)}`;
       const pattern = severity === 'medical'
         ? `<defs><pattern id="${patternId}" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)"><rect width="4" height="8" fill="#f1f3f6"></rect><rect x="4" width="4" height="8" fill="#ff3b3b"></rect></pattern></defs>`
         : '';
       const fill = severity === 'medical' ? `url(#${patternId})` : color;
       const dash = approximate ? 'stroke-dasharray="4 3"' : '';
-      const html = `<svg class="incident-triangle-symbol" viewBox="0 0 28 28" aria-hidden="true" style="transform:rotate(${rotation}deg)">${pattern}<polygon points="14,2 26,25 2,25" fill="${fill}" stroke="#07090d" stroke-width="5" stroke-linejoin="round"></polygon><polygon points="14,2 26,25 2,25" fill="${fill}" stroke="${color}" stroke-width="2" stroke-linejoin="round" ${dash}></polygon></svg>`;
-      return L.marker([incident.latitude, incident.longitude], {
-        pane: 'incident',
-        interactive: false,
-        keyboard: false,
-        icon: L.divIcon({
-          className: 'incident-centroid-marker',
-          html,
-          iconSize: [size, size],
-          iconAnchor: [size / 2, size / 2],
-        }),
+      const shape = triangleMarkers
+        ? `<polygon points="14,3 26,25 2,25" fill="${fill}" fill-opacity="0.28" stroke="${color}" stroke-width="1.8" stroke-linejoin="round" ${dash}></polygon>`
+        : `<circle cx="14" cy="14" r="11" fill="${fill}" stroke="#f5f7fa" stroke-width="2" ${dash}></circle>`;
+      return L.divIcon({
+        className: 'incident-map-marker',
+        html: `<svg class="incident-circle-symbol" width="${size}" height="${size}" viewBox="0 0 28 28" aria-hidden="true">${pattern}${shape}</svg>`,
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
+        popupAnchor: [0, -12],
       });
     }
 
@@ -1825,16 +1856,24 @@
       const coordinates = incidentCoordinatePair(incident);
       if (!coordinates) return null;
 
-      return L.circleMarker(coordinates, {
-        renderer: unitPulseRenderer,
+      return L.marker(coordinates, {
         pane: 'unitPulse',
-        radius: 13,
-        color: getSeverityColor(getSeverity(incident)),
-        weight: 2,
-        opacity: 0.8,
-        fill: false,
+        icon: unitPulseIcon(incident),
+        keyboard: false,
         interactive: false,
-        className: 'unit-count-pulse',
+      });
+    }
+
+    function unitPulseIcon(incident) {
+      const size = _markerSymbolSizePixels(incident) + (triangleMarkers ? 10 : 0) + 8;
+      const color = getSeverityColor(getSeverity(incident));
+      const shape = triangleMarkers
+        ? '<polygon points="14,3 26,25 2,25" stroke-linejoin="round"></polygon>'
+        : '<circle cx="14" cy="14" r="11"></circle>';
+      return L.divIcon({
+        className: 'incident-unit-pulse-icon',
+        html: `<svg class="unit-count-pulse" width="${size}" height="${size}" viewBox="0 0 28 28" fill="none" stroke="${color}" stroke-width="1.5" aria-hidden="true">${shape}</svg>`,
+        iconSize: [44, 44], iconAnchor: [22, 22],
       });
     }
 
@@ -1859,9 +1898,14 @@
 
       if (!marker._unitPulseRing) {
         marker._unitPulseRing = createUnitPulseRing(incident);
+        marker._unitPulseStyle = null;
       } else {
         marker._unitPulseRing.setLatLng(coordinates);
-        marker._unitPulseRing.setStyle({ color: getSeverityColor(getSeverity(incident)) });
+      }
+      const pulseStyle = `${triangleMarkers}:${_markerSymbolSizePixels(incident)}:${getSeverityColor(getSeverity(incident))}`;
+      if (marker._unitPulseRing && marker._unitPulseStyle !== pulseStyle) {
+        marker._unitPulseRing.setIcon(unitPulseIcon(incident));
+        marker._unitPulseStyle = pulseStyle;
       }
 
       if (marker._unitPulseRing && !map.hasLayer(marker._unitPulseRing)) {
@@ -1898,48 +1942,15 @@
       return popupHtml;
     }
 
-    // Create custom marker (triangle area instead of pinpoint dot)
+    // One readable symbol per incident, with a generous keyboard/touch target.
     function createMarker(incident, { mode = 'live' } = {}) {
-      const sev = getSeverity(incident);
-      const color = getSeverityColor(sev);
-      const fillColor = getMarkerFill(sev);
-      const approximate = isApproximateLocation(incident);
-
-      const seed = _incidentSeed(incident);
-      const sizeMeters = _geocodeTriangleSizeMeters(incident, mode);
-      const points = _triangleLatLngs(incident.latitude, incident.longitude, sizeMeters, seed);
-      const triangle = L.polygon(points, {
-        renderer: getMarkerRenderer(sev),
+      const marker = L.marker(incidentCoordinatePair(incident), {
         pane: 'incident',
-        color,
-        weight: mode === 'history' ? 1.5 : 2,
-        opacity: 1,
-        dashArray: approximate ? '5 4' : null,
-        fillColor,
-        fillOpacity: sev === 'medical'
-          ? (mode === 'history' ? 0.32 : 0.48)
-          : (mode === 'history' ? 0.2 : 0.32),
-      })
-        .on('add', () => {
-          if (sev === 'medical') ensureMedicalMarkerStripePattern();
-        });
-      // Follow the full triangle and pad its edges so every visible part is easy to select.
-      const hitTarget = L.polygon(points, {
-        renderer: markerRenderer,
-        pane: 'incident',
-        stroke: true,
-        color: '#000000',
-        weight: shouldUseMobileIncidentDialog() ? 36 : 20,
-        opacity: 0.001,
-        fill: true,
-        fillColor: '#000000',
-        fillOpacity: 0.001,
-        interactive: true,
-        bubblingMouseEvents: true,
-        className: 'incident-marker-hit-target',
+        icon: markerIcon(incident),
+        keyboard: true,
+        title: markerLabel(incident),
+        alt: markerLabel(incident),
       });
-      const markerSymbol = _markerSymbol(incident, sev, seed);
-      const marker = L.featureGroup([triangle, markerSymbol, hitTarget]);
 
       // Right-click → open in Google Maps (useful on desktop)
       marker.on('contextmenu', () => {
@@ -1950,16 +1961,19 @@
         const activeIncident = marker.incidentData || incident;
         const activeMode = marker.incidentMode || mode;
         if (shouldUseMobileIncidentDialog()) {
+          marker.unbindPopup();
           map.closePopup();
           openIncidentDialog(activeIncident, { mode: activeMode });
           return;
         }
         toggleIncidentDialog(false);
-        triangle.bindPopup(buildIncidentPopupHtml(activeIncident, { mode: activeMode })).openPopup();
+        if (!marker.getPopup()) {
+          marker.bindPopup(buildIncidentPopupHtml(activeIncident, { mode: activeMode }), { maxWidth: 320 }).openPopup();
+        }
       });
       marker.incidentData = incident;
       marker.incidentMode = mode;
-      marker.triangleLayer = triangle;
+      marker.renderSignature = buildIncidentListSignature([incident], mode);
       return marker;
     }
 
@@ -2008,6 +2022,18 @@
         } else {
           const marker = markers.get(incident.id);
           if (marker) {
+            const signature = buildIncidentListSignature([incident], mode);
+            if (signature !== marker.renderSignature) {
+              marker.setLatLng(incidentCoordinatePair(incident));
+              marker.setIcon(markerIcon(incident));
+              const element = marker.getElement();
+              if (element) {
+                element.title = markerLabel(incident);
+                element.setAttribute('aria-label', markerLabel(incident));
+              }
+              if (marker.getPopup()) marker.setPopupContent(buildIncidentPopupHtml(incident, { mode }));
+              marker.renderSignature = signature;
+            }
             marker.incidentData = incident;
             marker.incidentMode = mode;
             if (!map.hasLayer(marker)) marker.addTo(map);
@@ -2093,6 +2119,7 @@
           <div class="incident-location">
             <span>${escapeHtml(locationText)}</span>
             ${approximate ? '<span class="location-accuracy-note">Approximate Location</span>' : ''}
+            ${!hasLocation ? '<span class="location-accuracy-note">Map location unavailable</span>' : ''}
           </div>
           <div class="incident-meta">
             <span class="incident-agency ${sevClass}" title="Severity: ${sev.toUpperCase()}">${escapeHtml(agencyDisplay)}</span>
@@ -2218,8 +2245,19 @@
       syncModalOpenState();
     };
     
+    const circleToggle = document.getElementById('setting-circle-markers');
+    circleToggle.checked = !triangleMarkers;
+    circleToggle.addEventListener('change', () => {
+      triangleMarkers = !circleToggle.checked;
+      preferences.set('louisiana911TriangleMarkers', String(triangleMarkers));
+      markers.forEach(marker => {
+        marker.setIcon(markerIcon(marker.incidentData));
+        syncUnitPulseRing(marker, marker.incidentData, marker.incidentMode);
+      });
+    });
+
     // Load setting from localStorage (default: true - show all incidents on map)
-    let showAllHistoryOnMap = localStorage.getItem('showAllHistoryOnMap') !== 'false';
+    let showAllHistoryOnMap = preferences.get('showAllHistoryOnMap') !== 'false';
     if (showAllHistoryToggle) {
       showAllHistoryToggle.checked = showAllHistoryOnMap;
     }
@@ -2242,7 +2280,7 @@
     
     showAllHistoryToggle?.addEventListener('change', (e) => {
       showAllHistoryOnMap = e.target.checked;
-      localStorage.setItem('showAllHistoryOnMap', String(showAllHistoryOnMap));
+      preferences.set('showAllHistoryOnMap', String(showAllHistoryOnMap));
       // Refresh history view if we're on the history tab
       const historyPanel = document.getElementById('history-panel');
       if (historyPanel && !historyPanel.classList.contains('hidden')) {
@@ -2543,16 +2581,20 @@
     }
 
     // Update incidents
+    let liveRequestId = 0;
     async function updateIncidents() {
+      const requestId = ++liveRequestId;
+      const requestedSource = currentSource;
       try {
         let response = await fetch(`api/incidents/active?${sourceQueryParam()}`);
-        if (!response.ok && currentSource !== 'all') {
+        if (!response.ok && requestedSource !== 'all') {
           // Backward-compat fallback for deployments where source-param filtering is unavailable.
           response = await fetch('api/incidents/active?source=all');
         }
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         let allIncidents = await response.json();
+        if (requestId !== liveRequestId || requestedSource !== currentSource) return;
         allIncidents.forEach((incident) => {
           incident.source = normalizeSource(incident?.source);
         });
@@ -2768,11 +2810,12 @@
 
         const el = document.getElementById('last-update');
 
-        if (status.centralDate) {
+        if (status.centralDate && status.centralDate !== isoToday) {
           const prevToday = isoToday;
           isoToday = status.centralDate;
           if (historySelectedDate === prevToday) {
-            setHistoryDate(status.centralDate, { load: false });
+            const historyVisible = !document.getElementById('history-panel').classList.contains('hidden');
+            setHistoryDate(status.centralDate, { load: historyVisible });
           } else {
             renderDatePicker();
           }
@@ -2944,9 +2987,22 @@
 
     historyRequestNoticeClose?.addEventListener('click', hideHistoryRequestNotice);
 
+    let historyRequestId = 0;
     async function loadHistory(date) {
+      const requestId = ++historyRequestId;
+      const source = currentSource;
+      const isCurrent = () => requestId === historyRequestId && source === currentSource && date === historySelectedDate;
+      currentHistoryIncidents = [];
+      allHistoryIncidentsForDay = [];
+      historyTotal = 0;
+      historyHasAllIncidents = false;
+      lastHistoryListSignature = '';
+      const list = document.getElementById('history-list');
+      list.innerHTML = '<div class="empty-state" role="status">Loading incidents…</div>';
+      document.getElementById('history-count').classList.add('hidden');
+      document.getElementById('history-pagination').classList.add('hidden');
+      if (!document.getElementById('history-panel').classList.contains('hidden')) setMapMarkers([], { mode: 'history' });
       try {
-        const source = currentSource;
         const cacheKey = `${source}:${date || ''}`;
         const cached = historyDayCache.get(cacheKey);
         const maxCacheAge = date === isoToday ? 30000 : 300000;
@@ -2966,9 +3022,10 @@
             params.set('limit', String(historyBatchSize));
             params.set('offset', String(incidents.length));
             const response = await fetchHistoryApi(`api/incidents/history?${params.toString()}`);
-            if (response.status === 429) return;
+            if (!isCurrent()) return;
             if (!response.ok) throw new Error(`History request failed: ${response.status}`);
             const data = await response.json();
+            if (!isCurrent()) return;
             const batch = Array.isArray(data.incidents) ? data.incidents : [];
             batch.forEach((incident) => {
               incident.source = normalizeSource(incident?.source);
@@ -2984,7 +3041,7 @@
           }
         }
 
-        if (source !== currentSource || date !== historySelectedDate) return;
+        if (!isCurrent()) return;
         historyHasAllIncidents = incidents.length >= total;
 
         currentHistoryIncidents = incidents;
@@ -3000,7 +3057,7 @@
         }
         const { pageData, skipSort } = getHistoryPageData(currentHistoryIncidents);
         
-        updateHistoryCount(historyTotal, date);
+        if (historyVisible) updateHistoryCount(historyTotal, date);
         updateHistoryPagination();
         // Pass skipSort flag so we don't re-sort already-sorted urgency data
         renderHistoryList(pageData, date, { total: historyTotal, skipSort });
@@ -3017,7 +3074,9 @@
           }
         }
       } catch (error) {
+        if (!isCurrent()) return;
         console.error('Failed to fetch history:', error);
+        list.innerHTML = '<div class="empty-state" role="status"><p>History could not be loaded.</p><p class="empty-state-detail">Please wait a moment, then try again.</p><button class="popup-goto-btn" type="button" onclick="loadHistory(historySelectedDate)">Try again</button></div>';
       }
     }
 
@@ -3540,7 +3599,7 @@
         button.setAttribute('aria-pressed', String(active));
       });
       if (persist) {
-        localStorage.setItem('louisiana911ViewMode', next);
+        preferences.set('louisiana911ViewMode', next);
       }
 
       if (next === 'list') {
@@ -3617,7 +3676,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.3.6', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.4.1', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
@@ -3633,6 +3692,11 @@
     syncAgencyFilterGroupsToSource();
     setViewMode(viewMode, { persist: false });
     
+    const mapResizeObserver = new ResizeObserver(() => {
+      if (viewMode === 'map') map.invalidateSize({ pan: false });
+    });
+    mapResizeObserver.observe(mapContainer);
+
     // Polling interval (ms). Keep at least 60s to be gentle.
     let pollIntervalMs = 60000;
 

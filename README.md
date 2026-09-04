@@ -15,7 +15,7 @@ The site provides:
 - Monthly summaries
 - Mobile-friendly incident details
 
-Locations are shown only when a usable public location can be validated. Map triangles communicate an area rather than a guaranteed pinpoint location.
+Locations are shown only when a usable public location can be validated. Map markers identify reported locations, not guaranteed pinpoints or exact boundaries.
 
 ## Coverage
 
@@ -32,9 +32,13 @@ New Orleans information is published as a delayed daily record rather than a liv
 
 - **Red** — higher-severity incidents
 - **Yellow** — medium-severity incidents
-- **Blue** — lower-severity and public-service incidents
-- **Striped purple** — medical or EMS incidents
-- **Triangle size** — broader triangles indicate less precise placement
+- **Blue** — lower-severity incidents
+- **Green** — public-service incidents
+- **Gray** — custody or prisoner incidents
+- **Striped red and white** — medical or EMS incidents
+- **Marker size** — larger markers indicate less precise placement; dashed outlines highlight approximate locations
+
+Single transparent triangles are the default. Settings includes a saved **Circle markers** option. Marker shape, dark/light appearance, map/list view, and the History map setting use localStorage on the same browser and site. Live incidents with 5 or more units pulse with an outline matching their shape; reduced-motion preferences keep the outline static.
 
 Colors are a visual organization aid, not an official emergency classification.
 
@@ -58,3 +62,11 @@ Louisiana911 reflects what each public source publishes. It is not a complete re
 ## License
 
 See [LICENSE](LICENSE).
+
+## Checks
+
+Run `python -m unittest discover -s tests` for backend checks and `node --test tests/frontend.test.cjs` for frontend behavior regressions (Node.js 18 or newer).
+
+## Basemap configuration
+
+The map uses CARTO vector Dark Matter (dark) and Positron (light), with labeled raster tiles as a fallback if WebGL or vector loading fails. To enable CARTO, set `LOUISIANA911_CARTO_BASEMAP_KEY` on the web process, then restart it. `CARTO_BASEMAP_API_KEY` is also accepted. For local development, put `{"cartoKey":"YOUR_KEY"}` in `instance/basemaps.json` (excluded from Git and Docker builds); environment variables take precedence. Request a basemap key at https://carto.com/basemaps/apikey/. This is separate from the geocoder. The key is passed to the browser for tile requests; keep it out of source control and use the domain registered with CARTO. Without a key, the map uses OpenStreetMap with a monochrome dark appearance. Map-provider credits stay visible.

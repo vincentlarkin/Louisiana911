@@ -71,17 +71,43 @@ class CanonicalOriginTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
 
-    def test_map_uses_keyless_minimalist_dark_tiles(self):
+    def test_map_defaults_to_labeled_streets_with_dark_and_light_appearances(self):
         response = self.client.get('/', headers={'Host': 'localhost'})
         html = response.get_data(as_text=True)
 
-        self.assertIn('World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', html)
-        self.assertIn('World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', html)
+        self.assertNotIn('World_Dark_Gray_Base', html)
         self.assertIn('https://tile.openstreetmap.org/{z}/{x}/{y}.png', html)
-        self.assertIn("storedBasemapMode === 'detailed' ? 'detailed' : 'clean'", html)
-        self.assertIn('data-basemap="clean"', html)
-        self.assertIn('data-basemap="detailed"', html)
-        self.assertNotIn('basemaps.cartocdn.com', html)
+        self.assertIn("storedBasemapMode === 'light' ? 'light' : 'dark'", html)
+        self.assertIn('data-basemap="dark"', html)
+        self.assertIn('data-basemap="light"', html)
+        self.assertIn('const cartoLayers = cartoKey ?', html)
+        self.assertIn('dark_all/{z}/{x}/{y}{r}.png?key=', html)
+        self.assertIn('dark-matter-gl-style/style.json', html)
+        self.assertIn('positron-gl-style/style.json', html)
+
+    def test_basemap_key_uses_local_config_and_environment_override(self):
+        with tempfile.TemporaryDirectory() as instance_path, \
+                patch.object(app.app, 'instance_path', instance_path), \
+                patch.dict(os.environ, {'LOUISIANA911_CARTO_BASEMAP_KEY': '', 'CARTO_BASEMAP_API_KEY': ''}):
+            self.assertEqual('', app._carto_basemap_key())
+            config_path = os.path.join(instance_path, 'basemaps.json')
+            with open(config_path, 'w') as config_file:
+                config_file.write('{"cartoKey":"local-key"}')
+            self.assertEqual('local-key', app._carto_basemap_key())
+            with patch.dict(os.environ, {'LOUISIANA911_CARTO_BASEMAP_KEY': 'deployment-key'}):
+                self.assertEqual('deployment-key', app._carto_basemap_key())
+            with open(config_path, 'w') as config_file:
+                config_file.write('invalid JSON')
+            self.assertEqual('', app._carto_basemap_key())
+
+    def test_basemap_config_preserves_key_and_escapes_script_markup(self):
+        import json
+        key = 'test-key</script><script>alert(1)</script>'
+        with patch.dict(os.environ, {'LOUISIANA911_CARTO_BASEMAP_KEY': key}):
+            html = self.client.get('/', headers={'Host': 'localhost'}).get_data(as_text=True)
+        payload = html.split('id="map-config">', 1)[1].split('</script>', 1)[0]
+        self.assertNotIn('<', payload)
+        self.assertEqual(key, json.loads(payload)['cartoKey'])
 
     def test_incident_markers_have_a_fixed_visible_symbol_above_basemaps(self):
         response = self.client.get('/', headers={'Host': 'localhost'})
@@ -89,8 +115,9 @@ class CanonicalOriginTests(unittest.TestCase):
 
         self.assertIn("map.createPane('incident')", html)
         self.assertIn("map.getPane('incident').style.zIndex = 675", html)
-        self.assertIn("className: 'incident-centroid-marker'", html)
-        self.assertIn('L.featureGroup([triangle, markerSymbol, hitTarget])', html)
+        self.assertIn("className: 'incident-map-marker'", html)
+        self.assertNotIn('L.polygon(', html)
+        self.assertIn('incident-circle-symbol', html)
 
     def test_cross_origin_tiles_receive_origin_referrer(self):
         response = self.client.get('/', headers={'Host': 'localhost'})
@@ -193,11 +220,10 @@ class CanonicalOriginTests(unittest.TestCase):
         html = response.get_data(as_text=True)
 
         self.assertEqual(200, response.status_code)
-        self.assertIn("const hitTarget = L.polygon(points", html)
-        self.assertIn("weight: shouldUseMobileIncidentDialog() ? 36 : 20", html)
-        self.assertIn("fillOpacity: 0.001", html)
+        self.assertIn("iconSize: [36, 36]", html)
+        self.assertIn("keyboard: true", html)
         self.assertIn("openIncidentDialog(activeIncident", html)
-        self.assertIn("const marker = L.featureGroup([triangle, markerSymbol, hitTarget])", html)
+        self.assertIn("const marker = L.marker(incidentCoordinatePair(incident)", html)
 
     def test_incident_share_route_has_breaking_metadata_and_embedded_incident(self):
         share_id = '0123456789abcdef0123456789abcdef'
@@ -282,7 +308,7 @@ class CanonicalOriginTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertIn('id="history-request-notice"', html)
-        self.assertIn("if (response.status === 429)", html)
+        self.assertIn("if (response.status === 429 && showLimitNotice)", html)
         self.assertIn("response.headers.get('Retry-After')", html)
         self.assertIn('showHistoryRequestNotice(await getHistoryRetrySeconds(response))', html)
         self.assertIn('response.status === 404 && retrySession', html)

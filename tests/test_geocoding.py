@@ -57,6 +57,23 @@ class FailingArcGIS:
 
 
 class GeocodingTests(unittest.TestCase):
+    def test_cove_abbreviation_validates_celebration_intersection(self):
+        query = "CELEBRATION & N CRESCENT COVE, Shreveport, Caddo Parish, LA"
+        fake = FakeArcGIS({query: [FakeLocation(
+            "Celebration Cv & N Crescent Cv, Shreveport, Louisiana, 71105",
+            32.469373705084, -93.690419659806,
+            address_type="StreetInt", score=96.95,
+        )]})
+        app.geolocator_arcgis = fake
+        result = app.geocode_address(
+            "CELEBRATION", "DEAD END & N CRESCENT COVE", "SHV", source="caddo",
+        )
+        self.assertEqual("street+cross", result["quality"])
+        self.assertAlmostEqual(32.469373705084, result["lat"])
+        self.assertFalse(any("DEAD END" in q for q, _ in fake.calls))
+        self.assertFalse(app._road_name_matches("N CRESCENT COVE", "S Crescent Cv"))
+        self.assertFalse(app._road_name_matches("CELEBRATION", "Crescent Cv"))
+
     def setUp(self):
         self.original_arcgis = app.geolocator_arcgis
         self.original_osm = app.geolocator_osm

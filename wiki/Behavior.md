@@ -2,7 +2,7 @@
 
 ## Map markers
 
-Incidents use semi-transparent triangles instead of pinpoint dots. The shape represents a general area, and larger triangles indicate a less precise public location.
+Incidents use a single transparent triangle by default. Settings can switch to circles; existing saved choices are preserved. Marker shape, dark/light appearance, map/list view, and the History map setting persist in localStorage on that browser and site. Live incidents with 5 or more units pulse with a matching triangle or circle outline; the pulse stops below 5 units or in History. Reduced-motion preferences keep the outline static. Larger markers indicate less precise public locations, with dashed outlines for approximate placement. Markers are visual indicators, not exact location boundaries. Both dark and light street maps show road names and intersections at neighborhood zoom levels.
 
 If a location cannot be validated, the incident remains available in the list without a map marker.
 
