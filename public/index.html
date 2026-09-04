@@ -13,7 +13,7 @@
   <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
   <link rel="icon" href="/favicon-96x96.png" sizes="96x96" type="image/png">
   <link rel="apple-touch-icon" href="/images/louisiana911-icon-192.png" sizes="192x192">
-  <link rel="manifest" href="/manifest.webmanifest?v=4.5.0">
+  <link rel="manifest" href="/manifest.webmanifest?v=4.5.1">
   <meta name="theme-color" content="#0a0a0f">
   <meta name="color-scheme" content="dark">
   <meta name="application-name" content="Louisiana911">
@@ -83,7 +83,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.5.0" />
+  <link rel="stylesheet" href="styles.css?v=4.5.1" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -232,7 +232,7 @@
           </a>
         </div>
         <p class="info-credit">Made by <a class="info-credit-link" href="mailto:vincent@vincentlarkin.com">Vincent Larkin</a></p>
-        <p class="info-version">v4.5.0</p>
+        <p class="info-version">v4.5.1</p>
       </div>
     </div>
   </div>
@@ -2132,17 +2132,17 @@
       const shareId = getIncidentShareId(incident);
       
       return `
-        <div class="incident-card ${sevClass} ${isNew ? 'new' : ''}${interactiveClass}"
+        <div class="incident-card ${sevClass} ${isNew ? 'new' : ''}${interactiveClass}${incident.source === 'lakecharles' ? ' delayed-call' : ''}"
              data-id="${incident.id}"${interactionAttrs}>
           <div class="incident-header">
             <span class="incident-type">${escapeHtml(incident.description || 'Incident')}</span>
             <span class="incident-time">${escapeHtml(incidentTimeLabel(incident))}</span>
           </div>
-          ${incident.source === 'lakecharles' ? '<div class="incident-publication">Closed police call · 24h delay</div>' : ''}
           <div class="incident-location">
             <span>${escapeHtml(locationText)}</span>
             ${approximate ? '<span class="location-accuracy-note">Approximate Location</span>' : ''}
             ${!hasLocation ? '<span class="location-accuracy-note">Map location unavailable</span>' : ''}
+            ${incident.source === 'lakecharles' ? '<span class="incident-publication">Closed police call · 24h delay</span>' : ''}
           </div>
           <div class="incident-meta">
             <span class="incident-agency ${sevClass}" title="Severity: ${sev.toUpperCase()}">${escapeHtml(agencyDisplay)}</span>
@@ -3703,7 +3703,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.5.0', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.5.1', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);

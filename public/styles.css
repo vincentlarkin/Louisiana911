@@ -730,7 +730,7 @@
       color: var(--text-dim);
       font-size: 10px;
       line-height: 1.4;
-      margin: 0 0 5px;
+      flex: 0 0 100%;
     }
 
     .source-group {
@@ -1068,6 +1068,10 @@
 
       body.list-view .incident-header {
         display: contents;
+      }
+
+      body.list-view .delayed-call {
+        grid-template-columns: minmax(0, 1fr) 112px minmax(0, 1.2fr) minmax(0, 1.1fr);
       }
 
       body.list-view .incident-type,
@@ -3119,6 +3123,7 @@
         gap: 8px 16px;
         padding: 14px 16px;
       }
+      body.list-view .incident-card.delayed-call { grid-template-columns: minmax(0, 1fr) auto; }
       body.list-view .incident-time { justify-self: end; }
       body.list-view .incident-location,
       body.list-view .incident-meta { grid-column: 1 / -1; }
