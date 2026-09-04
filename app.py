@@ -310,8 +310,8 @@ feed_refreshed_by_source: dict[str, str | None] = {
 last_scrape_started_at: str | None = None  # ISO UTC
 last_scrape_finished_at: str | None = None  # ISO UTC
 
-# Identify the scraper politely in upstream logs.
-SCRAPER_USER_AGENT = "Louisiana911.com public-safety feed monitor (+https://louisiana911.com/)"
+# Identify our automated feed reader and its home page in upstream logs.
+SCRAPER_USER_AGENT = "Louisiana 911 Friendly Feed Reader (Made in Louisiana; automated public-safety updates; +https://louisiana911.com/)"
 
 QUIET = False
 
