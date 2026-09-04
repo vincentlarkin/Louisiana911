@@ -187,3 +187,86 @@ class DatabaseTests(unittest.TestCase):
             app.process_incidents(incidents)
         # One incident batch plus one metadata update, not a commit for each row.
         self.assertEqual(sum(sql == 'COMMIT' for sql in queries), 2)
+
+class AccessProtectionTests(unittest.TestCase):
+    def setUp(self):
+        with app._report_rate_lock:
+            app._report_rate_hits.clear()
+            app._history_date_rate_hits.clear()
+
+    def request_limit(self, date, at, **headers):
+        with app.app.test_request_context('/api/incidents/history?date=' + date, headers=headers), patch.object(app.time, 'monotonic', return_value=at):
+            return app._check_report_rate_limit()
+
+    def test_forwarded_ip_is_ignored_without_explicit_proxy_trust(self):
+        with app.app.test_request_context('/', headers={'X-Forwarded-For': '203.0.113.9'}), patch.object(app, 'TRUSTED_PROXY_HOPS', 0):
+            self.assertEqual(app._client_ip_for_rate_limit(), 'unknown')
+
+    def test_trusted_proxy_reads_from_right_and_rejects_invalid_ip(self):
+        with patch.object(app, 'TRUSTED_PROXY_HOPS', 1):
+            with app.app.test_request_context('/', headers={'X-Forwarded-For': 'forged, 203.0.113.9'}):
+                self.assertEqual(app._client_ip_for_rate_limit(), '203.0.113.9')
+            with app.app.test_request_context('/', headers={'X-Forwarded-For': 'invalid'}):
+                self.assertEqual(app._client_ip_for_rate_limit(), 'unknown')
+
+    def test_hourly_quota_survives_minute_windows_and_allows_same_date_pages(self):
+        with patch.object(app, 'HISTORY_HOURLY_DATE_LIMIT', 2), patch.object(app, 'HISTORY_DAILY_DATE_LIMIT', 10):
+            self.assertIsNone(self.request_limit('2026-07-01', 1000))
+            self.assertIsNone(self.request_limit('2026-07-02', 1100))
+            self.assertIsNone(self.request_limit('2026-07-02', 1200))
+            blocked = self.request_limit('2026-07-03', 1300)
+            self.assertEqual(blocked.status_code, 429)
+            self.assertGreater(int(blocked.headers['Retry-After']), 60)
+            self.assertIsNone(self.request_limit('2026-07-03', 5000))
+
+    def test_daily_quota_survives_hourly_windows(self):
+        with patch.object(app, 'HISTORY_HOURLY_DATE_LIMIT', 10), patch.object(app, 'HISTORY_DAILY_DATE_LIMIT', 2):
+            self.assertIsNone(self.request_limit('2026-07-01', 1000))
+            self.assertIsNone(self.request_limit('2026-07-02', 5000))
+            self.assertEqual(self.request_limit('2026-07-03', 10000).status_code, 429)
+            self.assertIsNone(self.request_limit('2026-07-03', 90000))
+
+    def test_repeat_date_requests_cannot_bypass_request_budget(self):
+        with patch.object(app, 'INCIDENT_HISTORY_REQUEST_RATE_LIMIT', 2):
+            self.assertIsNone(self.request_limit('2026-07-01', 1000))
+            self.assertIsNone(self.request_limit('2026-07-01', 1001))
+            self.assertEqual(self.request_limit('2026-07-01', 1002).status_code, 429)
+
+    def test_calendar_date_spellings_share_quota_entry(self):
+        with patch.object(app, 'INCIDENT_HISTORY_API_RATE_LIMIT', 1):
+            self.assertIsNone(self.request_limit('2026-7-1', 1000))
+            self.assertIsNone(self.request_limit('2026-07-01', 1001))
+            self.assertEqual(self.request_limit('2026-07-02', 1002).status_code, 429)
+
+    def test_public_payload_does_not_expose_internal_database_columns(self):
+        payload = app._public_incident({'id': 1, 'hash': 'public-share-id', 'description': 'FIRE',
+                                       'latitude': 32.5, 'longitude': -93.75, 'geocode_quality': 'published',
+                                       'geocode_query': 'internal query', 'geocoded_at': 'internal timestamp',
+                                       'geocode_version': 7, 'future_internal_column': 'private'})
+        self.assertEqual(payload['description'], 'FIRE')
+        self.assertEqual(payload['hash'], 'public-share-id')
+        for key in ('geocode_query', 'geocoded_at', 'geocode_version', 'future_internal_column'):
+            self.assertNotIn(key, payload)
+
+    def test_persistent_date_quota_survives_reopen_and_stores_no_raw_ip(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(app, 'ACCESS_LIMIT_DB', os.path.join(directory, 'limits.db')), \
+                patch.object(app, 'HISTORY_HOURLY_DATE_LIMIT', 1), patch.object(app, 'HISTORY_DAILY_DATE_LIMIT', 2), \
+                patch.object(app.time, 'time', return_value=100000), app.app.test_request_context('/'):
+            self.assertIsNone(app._persistent_history_date_limit('203.0.113.9', '2026-07-01'))
+            app._history_date_rate_hits.clear()
+            self.assertEqual(app._persistent_history_date_limit('203.0.113.9', '2026-07-02').status_code, 429)
+            self.assertIsNone(app._persistent_history_date_limit('203.0.113.9', '2026-07-01'))
+            self.assertIsNone(app._persistent_history_date_limit('203.0.113.10', '2026-07-02'))
+            conn = sqlite3.connect(app.ACCESS_LIMIT_DB)
+            try:
+                keys = [row[0] for row in conn.execute('SELECT client_key FROM history_access')]
+                self.assertTrue(all(len(key) == 64 and '203.0.113' not in key for key in keys))
+            finally:
+                conn.close()
+
+    def test_unavailable_quota_store_does_not_disable_limits(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(app, 'ACCESS_LIMIT_DB', os.path.join(directory, 'missing', 'limits.db')), \
+                app.app.test_request_context('/'):
+            response = app._persistent_history_date_limit('203.0.113.9', '2026-07-01')
+            self.assertEqual(response.status_code, 429)
+            self.assertEqual(response.headers['Retry-After'], '60')

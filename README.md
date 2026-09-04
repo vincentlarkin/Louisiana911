@@ -59,6 +59,7 @@ Louisiana911 reflects what each public source publishes. It is not a complete re
 - [Data sources](wiki/Data-Sources.md)
 - [Analytics](wiki/Analytics.md)
 - [Database behavior and validation](wiki/Database.md)
+- [Public-data access protections](wiki/Security.md)
 
 ## License
 
