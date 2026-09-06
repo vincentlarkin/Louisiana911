@@ -220,6 +220,22 @@ test('routine status polling preserves today’s History page and reloads at mid
   assert.equal(selected[0][1].load, true);
 });
 
+test('Caddo and combined header use an unambiguous Central update time at night', async () => {
+  const lastUpdate = {};
+  const ctx = loadFunctions(['updateStatus'], {
+    currentSource: 'caddo', isoToday: '2026-09-05', historySelectedDate: '2026-09-05',
+    fetch: async () => response({ centralDate: '2026-09-05', centralTzAbbr: 'CDT',
+      feedRefreshedAt: 'September 05 09:08', feedRefreshedBySource: { caddo: 'September 05 09:08' },
+      lastUpdateDisplay: '21:08:15 CDT', lastUpdateTooltip: 'September 5, 2026 21:08 CDT' }),
+    document: { getElementById: () => lastUpdate },
+  });
+  for (const source of ['caddo', 'all']) {
+    ctx.currentSource = source;
+    await ctx.updateStatus();
+    assert.equal(lastUpdate.textContent, '21:08:15 CDT');
+  }
+});
+
 test('failed History requests clear old incidents and show a retry action', async () => {
   const list = { innerHTML: '' };
   let mapItems;
