@@ -905,6 +905,7 @@ def _incident_share_payload(incident: dict) -> dict:
         'share_id': incident.get('hash'),
         'agency': incident.get('agency'),
         'time': incident.get('time'),
+        'reported_at': _incident_reported_at(incident),
         'units': incident.get('units'),
         'description': incident.get('description'),
         'street': incident.get('street'),
@@ -2304,7 +2305,7 @@ def scrape_caddo_incidents():
         log(f"Caddo scraping error: {e}")
         import traceback
         traceback.print_exc()
-        return [], None
+        return None, None
 
 
 def scrape_lafayette_incidents():
@@ -2315,7 +2316,7 @@ def scrape_lafayette_incidents():
         log(f"Lafayette scraping error: {e}")
         import traceback
         traceback.print_exc()
-        return [], None
+        return None, None
 
 
 def scrape_batonrouge_incidents():
@@ -2326,7 +2327,7 @@ def scrape_batonrouge_incidents():
         log(f"Baton Rouge scraping error: {e}")
         import traceback
         traceback.print_exc()
-        return [], None
+        return None, None
 
 
 def scrape_neworleans_incidents():
@@ -2550,11 +2551,13 @@ def _collector_geocode_result(conn, incident, source):
     return _incident_geocode_result(incident, source)
 
 
-def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: bool = True):
+def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: bool = True,
+                      allow_empty: bool = False):
     """Store/update incidents in database"""
     global last_update
 
-    if not incidents:
+    # Only a validated empty snapshot may clear the last active calls.
+    if incidents is None or (not incidents and not allow_empty):
         return
 
     source_default = _normalize_source_name(source)
@@ -2900,6 +2903,9 @@ def _store_feed_refresh(source: str, refreshed_at_text: str | None) -> None:
         meta_set('feed_refreshed_at', refreshed_at_text)
 
 
+LIVE_SNAPSHOT_SOURCES = {'caddo', 'batonrouge', 'lafayette'}
+
+
 def background_scrape():
     """Background task to scrape incidents periodically"""
     global feed_refreshed_at, last_scrape_started_at, last_scrape_finished_at
@@ -2924,8 +2930,9 @@ def background_scrape():
         log(f"[{datetime.now().strftime('%H:%M:%S')}] Scraping {label}...")
         incidents, refreshed_at_text = scraper()
         _store_feed_refresh(source_name, refreshed_at_text)
-        if incidents:
-            process_incidents(incidents, source=source_name)
+        if incidents or (source_name in LIVE_SNAPSHOT_SOURCES and incidents is not None):
+            process_incidents(incidents, source=source_name,
+                              allow_empty=source_name in LIVE_SNAPSHOT_SOURCES and incidents is not None)
             active_count = sum(1 for incident in incidents if incident.get('is_active', True))
             log(
                 f"[{datetime.now().strftime('%H:%M:%S')}] Processed {len(incidents)} "
@@ -4076,9 +4083,46 @@ PUBLIC_INCIDENT_FIELDS = (
 )
 
 
+def _incident_reported_at(incident):
+    """Keep full source timestamps or infer an undated clock's calendar date.
+
+    Lafayette and delayed sources store their published date in first_seen.
+    Caddo/Baton Rouge and legacy Lafayette rows need an estimate anchored to
+    first_seen, never last_seen or today. An outage can make this estimate late.
+    """
+    source = _normalize_incident_source_for_read(incident.get('source'))
+    first_seen = _parse_iso_datetime(incident.get('first_seen'))
+    if source in ('neworleans', 'lakecharles'):
+        return first_seen.isoformat() if first_seen else None
+    if source not in LIVE_SNAPSHOT_SOURCES:
+        return None
+    raw = str(incident.get('time') if incident.get('time') is not None else '').strip()
+    if not first_seen or not re.fullmatch(r'\d{1,4}', raw):
+        return None
+    hour, minute = divmod(int(raw), 100)
+    if hour > 23 or minute > 59:
+        return None
+    local = first_seen.astimezone(CENTRAL_TZ)
+    for days_back in (0, 1):
+        day = local.date() - timedelta(days=days_back)
+        candidates = []
+        for fold in (0, 1):
+            candidate = datetime(day.year, day.month, day.day, hour, minute,
+                                 tzinfo=CENTRAL_TZ, fold=fold).astimezone(timezone.utc)
+            roundtrip = candidate.astimezone(CENTRAL_TZ)
+            if (candidate <= first_seen and roundtrip.date() == day
+                    and (roundtrip.hour, roundtrip.minute) == (hour, minute)):
+                candidates.append(candidate)
+        if candidates:
+            return max(candidates).isoformat()
+    return None
+
+
 def _public_incident(incident):
     # Never serialize a database row wholesale: new internal columns stay private.
-    return {field: incident.get(field) for field in PUBLIC_INCIDENT_FIELDS}
+    payload = {field: incident.get(field) for field in PUBLIC_INCIDENT_FIELDS}
+    payload['reported_at'] = _incident_reported_at(incident)
+    return payload
 
 
 @app.route('/api/incidents/active')
@@ -4629,8 +4673,9 @@ def force_refresh():
         ):
             incidents, refreshed_at_text = scraper()
             _store_feed_refresh(source_name, refreshed_at_text)
-            process_incidents(incidents, source=source_name)
-            total_count += len(incidents)
+            process_incidents(incidents, source=source_name,
+                              allow_empty=source_name in LIVE_SNAPSHOT_SOURCES and incidents is not None)
+            total_count += len(incidents or [])
         last_scrape_finished_at = datetime.now(timezone.utc).isoformat()
         meta_set('last_scrape_finished_at', last_scrape_finished_at)
         return jsonify({

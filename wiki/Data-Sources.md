@@ -14,6 +14,12 @@ Source labels and public descriptions are normalized for a shared display while 
 
 Louisiana911 does not claim to reproduce a complete dispatch record or final investigative outcome.
 
+## Live snapshot contract
+
+Caddo, Baton Rouge, and Lafayette adapters return an empty list only for a recognized, fully parsed empty snapshot. Missing pages, failed requests, changed schemas, or partially parsed records raise an error; the collector wrappers return `None` for those failures. Baton Rouge also verifies the page's published incident count. Lafayette preserves its full source timestamp in `occurred_at` instead of discarding the date.
+
+The collector enables empty-snapshot removal only for sources in `LIVE_SNAPSHOT_SOURCES`. A new live adapter must validate complete snapshots and distinguish failures from empty results before joining that set. Delayed publication feeds have different retention rules and must not inherit live-feed removal automatically.
+
 ## Lake Charles import
 
 The adapter reads the [public Police-to-Citizen search](https://lakecharles.policetocitizen.com/cadcalls) using its normal anonymous session and CSRF cookie. This is the site's public web API, not a guaranteed partner API. No account, API key, open calls, unrestricted date search or incident-detail lookup is used.

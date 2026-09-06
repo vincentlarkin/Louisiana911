@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import re
+from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
 
 
 FEED_URL = "https://lafayette911.org/wp-json/traffic-feed/v1/data"
+CENTRAL_TZ = ZoneInfo("America/Chicago")
 
 # The feed renders the municipality on a new line, but HTML text extraction
 # collapses that line into the preceding cross street. Match known service-area
@@ -26,25 +28,6 @@ MUNICIPALITY_SUFFIXES = (
 
 def _clean_ws(value: str | None) -> str:
     return re.sub(r"\s+", " ", value or "").strip()
-
-
-def _parse_reported_time(value: str | None) -> str:
-    text = _clean_ws(value)
-    if not text:
-        return ""
-    try:
-        dt = datetime.strptime(text, "%m/%d/%Y %H:%M")
-        return dt.strftime("%H%M")
-    except Exception:
-        # Fallback to "HHMM" extraction if the timestamp format changes.
-        match = re.search(r"(\d{1,2}):(\d{2})", text)
-        if not match:
-            return ""
-        hour = int(match.group(1))
-        minute = int(match.group(2))
-        if 0 <= hour <= 23 and 0 <= minute <= 59:
-            return f"{hour:02d}{minute:02d}"
-        return ""
 
 
 def _split_location(value: str | None) -> tuple[str, str, str]:
@@ -108,36 +91,43 @@ def scrape(*, user_agent: str, timeout_seconds: int = 15) -> tuple[list[dict], s
     response.raise_for_status()
 
     payload = response.json()
-    if not payload.get("success"):
-        return [], None
+    if not isinstance(payload, dict) or payload.get("success") is not True or not isinstance(payload.get("data"), str):
+        raise ValueError("Lafayette traffic request did not return a successful snapshot")
 
     html = payload.get("data") or ""
     soup = BeautifulSoup(html, "html.parser")
+    table = soup.find("table")
+    expected_headers = ["located at", "due to", "reported at", "assisting"]
+    header = table.find("tr") if table else None
+    if (header is None or [_clean_ws(cell.get_text(" ", strip=True)).lower()
+                          for cell in header.find_all(["td", "th"])] != expected_headers):
+        raise ValueError("Lafayette traffic table is unrecognized")
 
     incidents: list[dict] = []
-    rows = soup.find_all("tr")
+    rows = table.find_all("tr")[1:]
     for row in rows:
         cells = row.find_all("td")
-        if len(cells) < 4:
-            continue
+        if len(cells) != 4:
+            raise ValueError("Lafayette traffic row has an unexpected layout")
 
         location_raw = cells[0].get_text(" ", strip=True)
-        if _clean_ws(location_raw).lower() == "located at":
-            continue
-
         description = _clean_ws(cells[1].get_text(" ", strip=True))
-        time_val = _parse_reported_time(cells[2].get_text(" ", strip=True))
+        reported_text = _clean_ws(cells[2].get_text(" ", strip=True))
+        # Preserve the source's full date, including calls spanning many days.
+        reported = datetime.strptime(reported_text, "%m/%d/%Y %H:%M").replace(tzinfo=CENTRAL_TZ)
+        time_val = reported.strftime("%H%M")
         agency = _normalize_assisting(cells[3].get_text(" ", strip=True))
         street, cross_streets, municipality = _split_location(location_raw)
 
         if not description:
-            continue
+            raise ValueError("Lafayette traffic row has no description")
 
         incidents.append(
             {
                 "source": "lafayette",
                 "agency": agency or "UNKNOWN",
                 "time": time_val,
+                "occurred_at": reported.astimezone(timezone.utc).isoformat(),
                 "units": 1,
                 "description": description,
                 "street": street,

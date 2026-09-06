@@ -19,6 +19,12 @@ The same color language is used in the list and on the map. These categories are
 
 Latest shows currently published information. History shows available records for a selected date. Source and severity filters apply to both views.
 
+All feeds keep the source's reported Central clock time and show a date, for example `Sep-5 23:40`. Caddo and Baton Rouge do not publish a call date, so the date is estimated as the latest occurrence of that clock time before the collector first observed the call. The date stays anchored to that observation across midnight; opening the page later does not shift it. Calls already present after an outage may be older than this estimate. Their History calendar continues to group records by first-observed date, so a call first collected just after midnight can show the previous day's reported time.
+
+Lafayette imports retain the full published date and time, including calls that have lasted multiple days; History groups these by the published date. Older Lafayette records collected before this change use an estimate from their stored observation time. New Orleans and Lake Charles keep their published dates and their existing daily/delayed status rules.
+
+When a call disappears from a successfully parsed Caddo, Baton Rouge, or Lafayette snapshot, it leaves Latest and its live map and becomes available in History. A validated empty table clears that source's remaining live calls too. Failed requests, malformed rows, or unrecognized pages preserve the previous snapshot until collection succeeds. Removal does not establish an official outcome; saved history remains available. One source's snapshot cannot clear another source's calls.
+
 ## Location quality
 
 Published coordinates and road information are checked before display. Approximate placements are labeled, and an unresolved location is not replaced with a guessed city-center point.
