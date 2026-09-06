@@ -2843,8 +2843,9 @@
         const selectedFeedRefresh = currentSource === 'all'
           ? status.feedRefreshedAt
           : status.feedRefreshedBySource?.[currentSource];
-        // Prefer the selected source's own published refresh label when available.
-        if (selectedFeedRefresh) {
+        // Caddo's refresh clock omits AM/PM; the server's Central timestamp is
+        // unambiguous. The combined view also uses the collector timestamp.
+        if (selectedFeedRefresh && !['all', 'caddo'].includes(currentSource)) {
           const tz = status.centralTzAbbr || 'CT';
           el.textContent = ['neworleans', 'lakecharles'].includes(currentSource)
             ? selectedFeedRefresh
