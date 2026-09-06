@@ -1,57 +1,39 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://louisiana911.com/</loc>
-    <lastmod>2026-07-18</lastmod>
-    <changefreq>hourly</changefreq>
-    <priority>1.0</priority>
+    <lastmod>2026-09-06</lastmod>
   </url>
   <url>
     <loc>https://louisiana911.com/about/</loc>
-    <lastmod>2026-07-18</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
+    <lastmod>2026-09-06</lastmod>
   </url>
   <url>
     <loc>https://louisiana911.com/caddo911/</loc>
-    <lastmod>2026-07-18</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.9</priority>
+    <lastmod>2026-08-12</lastmod>
   </url>
   <url>
     <loc>https://louisiana911.com/coverage/</loc>
-    <lastmod>2026-07-18</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
+    <lastmod>2026-09-06</lastmod>
   </url>
   <url>
     <loc>https://louisiana911.com/coverage/baton-rouge/</loc>
-    <lastmod>2026-07-18</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
+    <lastmod>2026-08-12</lastmod>
   </url>
   <url>
     <loc>https://louisiana911.com/coverage/lafayette/</loc>
-    <lastmod>2026-07-18</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
+    <lastmod>2026-08-12</lastmod>
   </url>
   <url>
     <loc>https://louisiana911.com/coverage/new-orleans/</loc>
-    <lastmod>2026-07-18</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
+    <lastmod>2026-08-12</lastmod>
   </url>
   <url>
     <loc>https://louisiana911.com/reports/</loc>
-    <lastmod>2026-07-18</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <lastmod>2026-09-04</lastmod>
   </url>
   <url>
     <loc>https://louisiana911.com/reports/monthly/</loc>
-    <lastmod>2026-07-18</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <lastmod>2026-09-06</lastmod>
   </url>
 </urlset>

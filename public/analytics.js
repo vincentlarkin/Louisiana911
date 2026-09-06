@@ -38,6 +38,9 @@
     allow_ad_personalization_signals: false,
     page_type: PAGE_TYPE,
     source_view: getSourceView(),
+    page_location: safePageUrl(location.href, true),
+    page_referrer: safePageUrl(document.referrer),
+    page_title: PAGE_TYPE === 'shared_incident' ? 'Shared incident | Louisiana911' : document.title,
     transport_type: 'beacon'
   });
 
@@ -101,6 +104,8 @@
   }, 5000);
 
   function loadGoogleTag() {
+    // Local previews retain the event queue for testing without polluting GA4.
+    if (!['louisiana911.com', 'www.louisiana911.com'].includes(location.hostname)) return;
     const script = document.createElement('script');
     script.async = true;
     script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(MEASUREMENT_ID)}`;
@@ -112,6 +117,7 @@
     if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,39}$/.test(name)) return;
     const eventParameters = {
       page_type: PAGE_TYPE,
+      source_view: getSourceView(),
       ...parameters,
       transport_type: 'beacon'
     };
@@ -135,6 +141,7 @@
     const position = getClickPosition(event);
 
     clickCount += 1;
+    trackFeatureClick(target);
     track('ui_click', {
       action_type: outbound ? 'outbound_link' : getActionType(target, link, mapElement),
       element_name: getElementName(target, link, mapElement),
@@ -146,6 +153,25 @@
       y_viewport_bucket: position.yViewport,
       y_page_bucket: position.yPage
     });
+  }
+
+  function trackFeatureClick(target) {
+    if (target.disabled || target.getAttribute?.('aria-disabled') === 'true') return;
+    const feature = target.closest?.('[data-source], [data-view-mode], [data-tab], [data-filter], [data-urgency], [data-br-agency], [data-laf-unit], [data-basemap]');
+    if (!feature) return;
+    const data = feature.dataset;
+    if (data.source && ['all', 'caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles'].includes(data.source)) {
+      track('source_select', { source_view: data.source });
+    } else if (['map', 'list'].includes(data.viewMode)) {
+      track('view_mode_select', { view_mode: data.viewMode });
+    } else if (['live', 'history'].includes(data.tab)) {
+      track('incident_tab_select', { view_mode: data.tab });
+    } else if (data.basemap) {
+      track('basemap_select', { control_value: cleanToken(data.basemap, 40) });
+    } else {
+      const key = ['filter', 'urgency', 'brAgency', 'lafUnit'].find(key => data[key]);
+      if (key) track('incident_filter', { control_name: key, control_value: cleanToken(data[key], 60) });
+    }
   }
 
   function trackControlChange(event) {
@@ -174,7 +200,8 @@
       scrollFramePending = false;
       const root = document.documentElement;
       const scrollableHeight = Math.max(root.scrollHeight - window.innerHeight, 0);
-      const depth = scrollableHeight === 0 ? 100 : Math.min(100, Math.round((window.scrollY / scrollableHeight) * 100));
+      if (scrollableHeight === 0) return;
+      const depth = Math.min(100, Math.round((window.scrollY / scrollableHeight) * 100));
       maxScrollDepth = Math.max(maxScrollDepth, depth);
 
       SCROLL_MILESTONES.forEach((milestone) => {
@@ -309,6 +336,8 @@
   function getPageType() {
     const path = location.pathname.replace(/\/+$/, '') || '/';
     if (path === '/') return 'incident_map';
+    if (path === '/index.html') return 'incident_map';
+    if (path.startsWith('/incident/')) return 'shared_incident';
     if (path === '/reports/monthly') return 'monthly_report';
     if (path === '/reports') return 'reports_hub';
     if (path === '/about') return 'about';
@@ -318,7 +347,9 @@
   }
 
   function getSourceView() {
-    const source = new URLSearchParams(location.search).get('source') || '';
+    const source = document.querySelector('.source-tab.active')?.dataset.source
+      || document.querySelector('#report-source')?.value
+      || new URLSearchParams(location.search).get('source') || '';
     return ['caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles'].includes(source) ? source : 'all';
   }
 
@@ -337,6 +368,7 @@
       if (target.closest?.('.leaflet-control')) return 'map_control';
       return 'map_canvas';
     }
+    if (target.closest?.('.incident-card')) return 'incident_card';
 
     const datasetKeys = ['analyticsLabel', 'viewMode', 'tab', 'infoTab', 'source', 'filter', 'urgency', 'brAgency', 'lafUnit', 'sort', 'action', 'month', 'date'];
     for (const key of datasetKeys) {
@@ -397,7 +429,26 @@
     try {
       const url = new URL(href, location.href);
       if (url.protocol === 'mailto:' || url.protocol === 'tel:') return url.protocol.slice(0, -1);
-      return cleanToken(`${url.hostname === location.hostname ? '' : url.hostname}${url.pathname}`, 100);
+      const pathname = url.pathname.replace(/\/incident\/[^/]+/g, '/incident/shared');
+      return cleanToken(`${url.hostname === location.hostname ? '' : url.hostname}${pathname}`, 100);
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function safePageUrl(value, keepAttribution = false) {
+    if (!value) return '';
+    try {
+      const url = new URL(value, location.href);
+      const attribution = new URLSearchParams();
+      if (keepAttribution) {
+        // Retain standard campaign/ad attribution while dropping arbitrary input.
+        for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_id', 'utm_term', 'utm_content', 'gclid', 'dclid', 'gbraid', 'wbraid']) {
+          if (url.searchParams.has(key)) attribution.set(key, url.searchParams.get(key));
+        }
+      }
+      const query = attribution.toString();
+      return `${url.origin}${url.pathname.replace(/\/incident\/[^/]+/g, '/incident/shared')}${query ? `?${query}` : ''}`;
     } catch (_) {
       return '';
     }

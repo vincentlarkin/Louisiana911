@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 function loadFunctions(names, globals = {}) {
-  const context = vm.createContext({ console, ...globals });
+  const context = vm.createContext({ console, window: {}, ...globals });
   for (const name of names) {
     const match = new RegExp(`    (?:async )?function ${name}\\(`).exec(html);
     assert.ok(match, `Missing function ${name}`);
@@ -22,6 +22,32 @@ function deferred() {
 }
 const incident = { id: 1, source: 'caddo', latitude: 32.5, longitude: -93.7,
   description: 'TRAFFIC STOP', street: 'MAIN ST', units: 1, time: '1200' };
+
+test('sharing reports successful native/copy outcomes without counting cancellation or failure', async () => {
+  for (const outcome of ['native', 'cancel', 'copy', 'failed']) {
+    const events = [];
+    const ctx = loadFunctions(['shareIncident'], {
+      window: { louisiana911Analytics: { track: (name, params) => events.push({name, params}) } },
+      navigator: outcome === 'native' ? { share: async () => {} }
+        : outcome === 'cancel' ? { share: async () => { throw { name: 'AbortError' }; } } : {},
+      incidentShareUrl: () => 'https://louisiana911.com/incident/private-id',
+      incidentActivityState: () => ({ label: 'ACTIVE' }),
+      incidentLocationText: () => 'private location',
+      normalizeSource: () => 'caddo', showIncidentShareNotice() {},
+      copyTextToClipboard: async () => { if (outcome === 'failed') throw new Error('denied'); },
+      console: { error() {} },
+    });
+    const result = await ctx.shareIncident(incident);
+    const success = ['native', 'copy'].includes(outcome);
+    assert.equal(result, success);
+    assert.equal(events.length, success ? 1 : 0);
+    if (success) {
+      assert.equal(events[0].name, 'share');
+      assert.equal(events[0].params.method, outcome === 'native' ? 'native' : 'copy_link');
+      assert.equal(JSON.stringify(events).includes('private'), false);
+    }
+  }
+});
 
 test('hang-up and open-line calls are blue; suicide attempts are solid red', () => {
   const ctx = loadFunctions(['_normalizeDesc', '_includesAny', '_includesWholeTerm', 'getSeverity', 'getSeverityColor']);

@@ -963,7 +963,7 @@ def _serve_shared_incident_page(incident: dict):
         f'<title>{escaped_title}</title>',
     )
     index_html = index_html.replace(
-        '<meta name="description" content="View Louisiana 911 public incident feeds on one map, including live Caddo 911 calls, Baton Rouge and Lafayette traffic incidents, and daily NOPD calls.">',
+        '<meta name="description" content="View live Caddo 911 calls, Baton Rouge and Lafayette traffic, daily New Orleans records, and Lake Charles closed calls with a 24-hour delay on one Louisiana map.">',
         f'<meta name="description" content="{escaped_description}">',
     )
     index_html = index_html.replace(
@@ -979,7 +979,7 @@ def _serve_shared_incident_page(incident: dict):
         f'<meta property="og:title" content="{escaped_title}">',
     )
     index_html = index_html.replace(
-        '<meta property="og:description" content="Live Caddo 911 calls, Baton Rouge and Lafayette traffic incidents, and daily NOPD calls on one public Louisiana map.">',
+        '<meta property="og:description" content="Live Caddo 911 calls and traffic feeds alongside delayed New Orleans records and Lake Charles closed calls on one Louisiana map.">',
         f'<meta property="og:description" content="{escaped_description}">',
     )
     index_html = index_html.replace(

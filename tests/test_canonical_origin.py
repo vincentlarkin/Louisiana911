@@ -1,6 +1,9 @@
 import os
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
+from urllib.parse import urlsplit
+from scripts.update_sitemap import indexable_pages, NAMESPACE
 from unittest.mock import patch
 
 _IMPORT_DB_PATH = os.path.join(
@@ -157,7 +160,7 @@ class CanonicalOriginTests(unittest.TestCase):
 
     def test_versioned_shell_assets_are_immutable(self):
         for path in (
-            '/analytics.js?v=4.3.0',
+            '/analytics.js?v=4.6.0',
             '/styles.css?v=4.3.6',
             '/service-worker.js?v=4.3.6',
             '/manifest.webmanifest?v=4.3.6',
@@ -192,12 +195,31 @@ class CanonicalOriginTests(unittest.TestCase):
                 response = self.client.get(path, headers={'Host': 'localhost'})
                 self.assertEqual(200, response.status_code)
                 html = response.get_data(as_text=True)
-                self.assertEqual(1, html.count('/analytics.js?v=4.3.0'))
-                self.assertIn('<script defer src="/analytics.js?v=4.3.0"></script>', html)
+                self.assertEqual(1, html.count('/analytics.js?v=4.6.0'))
+                self.assertIn('<script defer src="/analytics.js?v=4.6.0"></script>', html)
                 self.assertNotIn('googletagmanager.com/gtag/js', html)
 
+    def test_sitemap_contains_only_complete_canonical_indexable_pages(self):
+        response = self.client.get('/sitemap.xml', headers={'Host': 'localhost'})
+        self.assertEqual(200, response.status_code)
+        root = ET.fromstring(response.data)
+        urls = [entry.find(f'{{{NAMESPACE}}}loc').text for entry in root]
+        self.assertEqual(sorted(indexable_pages()), sorted(urls))
+        self.assertEqual(len(urls), len(set(urls)))
+        for url in urls:
+            with self.subTest(url=url):
+                page = self.client.get(urlsplit(url).path, headers={'Host': 'localhost'})
+                self.assertEqual(200, page.status_code)
+                html = page.get_data(as_text=True)
+                self.assertIn(f'<link rel="canonical" href="{url}">', html)
+                self.assertNotIn('noindex', html)
+                self.assertNotIn('/incident/', url)
+        robots = self.client.get('/robots.txt', headers={'Host': 'localhost'}).get_data(as_text=True)
+        self.assertIn('Sitemap: https://louisiana911.com/sitemap.xml', robots)
+        self.assertIn('Disallow: /api/', robots)
+
     def test_analytics_bundle_includes_key_engagement_events(self):
-        response = self.client.get('/analytics.js?v=4.3.0', headers={'Host': 'localhost'})
+        response = self.client.get('/analytics.js?v=4.6.0', headers={'Host': 'localhost'})
         self.assertEqual(200, response.status_code)
         javascript = response.get_data(as_text=True)
         for event_name in (
