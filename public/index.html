@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="en-US">
 <head>
-  <script defer src="/analytics.js?v=4.3.0"></script>
+  <script defer src="/analytics.js?v=4.6.0"></script>
   <meta charset="UTF-8">
   <script type="application/json" id="map-config">{}</script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Louisiana 911 Calls &amp; Caddo 911 Live Map | Louisiana911</title>
-  <meta name="description" content="View Louisiana 911 public incident feeds on one map, including live Caddo 911 calls, Baton Rouge and Lafayette traffic incidents, and daily NOPD calls.">
+  <meta name="description" content="View live Caddo 911 calls, Baton Rouge and Lafayette traffic, daily New Orleans records, and Lake Charles closed calls with a 24-hour delay on one Louisiana map.">
   <meta name="robots" content="index,follow,max-image-preview:large">
   <link rel="canonical" href="https://louisiana911.com/">
   <link rel="icon" href="/favicon.ico" sizes="any" type="image/x-icon">
@@ -21,7 +21,7 @@
   <meta name="apple-mobile-web-app-title" content="Louisiana911">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta property="og:title" content="Louisiana 911 Calls &amp; Caddo 911 Live Map">
-  <meta property="og:description" content="Live Caddo 911 calls, Baton Rouge and Lafayette traffic incidents, and daily NOPD calls on one public Louisiana map.">
+  <meta property="og:description" content="Live Caddo 911 calls and traffic feeds alongside delayed New Orleans records and Lake Charles closed calls on one Louisiana map.">
   <meta property="og:image" content="https://louisiana911.com/og.png">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1733">
@@ -1811,6 +1811,7 @@
       if (!forceCopy && typeof navigator.share === 'function') {
         try {
           await navigator.share({ title, text, url });
+          window.louisiana911Analytics?.track('share', { method: 'native', content_type: 'incident', source_view: normalizeSource(incident?.source) });
           return true;
         } catch (error) {
           if (error?.name === 'AbortError') return false;
@@ -1820,6 +1821,7 @@
       try {
         await copyTextToClipboard(url);
         showIncidentShareNotice('Incident link copied');
+        window.louisiana911Analytics?.track('share', { method: 'copy_link', content_type: 'incident', source_view: normalizeSource(incident?.source) });
         return true;
       } catch (error) {
         console.error('Failed to copy incident link:', error);
@@ -2454,6 +2456,7 @@
       if (!force && monthlyReportCache.has(key)) {
         setMonthlyReportStatus(`Showing cached report for ${formatReportMonthLabel(month)}.`);
         renderMonthlyReport(monthlyReportCache.get(key));
+        window.louisiana911Analytics?.track('monthly_report_view', { source_view: source, view_mode: 'dialog', report_month: month });
         return;
       }
 
@@ -2471,6 +2474,7 @@
         const report = await response.json();
         monthlyReportCache.set(key, report);
         renderMonthlyReport(report);
+        window.louisiana911Analytics?.track('monthly_report_view', { source_view: source, view_mode: 'dialog', report_month: month });
         const excluded = Number(report?.excludedIncidentCount || 0);
         setMonthlyReportStatus(
           excluded > 0
@@ -2481,6 +2485,7 @@
         currentMonthlyReport = null;
         monthlyReportView?.classList.add('hidden');
         console.error('Failed to fetch monthly report:', error);
+        window.louisiana911Analytics?.track('report_load_error', { source_view: source, view_mode: 'dialog' });
         setMonthlyReportStatus('Unable to load the monthly report right now.', 'error');
       }
     }
@@ -3085,6 +3090,7 @@
 
         // Replace map markers with history results when History tab is active
         if (historyVisible) {
+          window.louisiana911Analytics?.track('history_view', { source_view: source, result_count: total });
           if (showAllHistoryOnMap && allHistoryIncidentsForDay.length > 0) {
             // Show all incidents for the day on map
             const allFiltered = getFilteredIncidents(allHistoryIncidentsForDay, currentFilter, currentUrgencyFilter);
@@ -3097,6 +3103,7 @@
       } catch (error) {
         if (!isCurrent()) return;
         console.error('Failed to fetch history:', error);
+        window.louisiana911Analytics?.track('history_load_error', { source_view: source });
         list.innerHTML = '<div class="empty-state" role="status"><p>History could not be loaded.</p><p class="empty-state-detail">Please wait a moment, then try again.</p><button class="popup-goto-btn" type="button" onclick="loadHistory(historySelectedDate)">Try again</button></div>';
       }
     }

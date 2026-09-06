@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en-US">
 <head>
-  <script defer src="/analytics.js?v=4.3.0"></script>
+  <script defer src="/analytics.js?v=4.6.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <base href="/">
@@ -967,6 +967,7 @@
       if (!force && reportCache.has(cacheKey)) {
         setStatus(`Showing cached browser copy for ${monthLabel(month)}.`);
         renderReport(reportCache.get(cacheKey));
+        window.louisiana911Analytics?.track('monthly_report_view', { source_view: source, view_mode: 'page', report_month: month });
         return;
       }
 
@@ -986,6 +987,7 @@
         const report = await response.json();
         reportCache.set(cacheKey, report);
         renderReport(report);
+        window.louisiana911Analytics?.track('monthly_report_view', { source_view: source, view_mode: 'page', report_month: month });
         const excluded = Number(report?.excludedIncidentCount || 0);
         const staticText = report?.isStatic ? 'Static saved report loaded.' : 'Live report loaded.';
         setStatus(
@@ -995,6 +997,7 @@
         );
       } catch (error) {
         console.error('Failed to fetch monthly report:', error);
+        window.louisiana911Analytics?.track('report_load_error', { source_view: source, view_mode: 'page' });
         setStatus('Unable to load the monthly report right now.', 'error');
       }
     }

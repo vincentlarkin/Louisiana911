@@ -68,7 +68,9 @@ See [LICENSE](LICENSE).
 
 ## Checks
 
-Run `python -m unittest discover -s tests` for backend checks and `node --test tests/frontend.test.cjs` for frontend behavior regressions (Node.js 18 or newer).
+Run `python -m unittest discover -s tests` for backend checks and `node --test tests/frontend.test.cjs tests/analytics.test.cjs` for frontend and analytics behavior regressions (Node.js 18 or newer).
+
+After public page content changes, run `python scripts/update_sitemap.py` before committing. It discovers indexable canonical HTML pages and refreshes their modification dates from Git or changed files, excluding tracker-version-only edits. The backend sitemap test checks that each listed URL returns 200 with matching canonical metadata and that no indexable page is missing. Shared incident pages remain `noindex,follow` and stay outside the sitemap. `robots.txt` advertises the sitemap and excludes API crawling.
 
 ## Basemap configuration
 
