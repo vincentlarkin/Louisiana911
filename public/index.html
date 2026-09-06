@@ -1448,18 +1448,13 @@
     }
 
     function _incidentTimeValue(incident) {
-      if (['lakecharles', 'neworleans'].includes(incident?.source)) {
-        const timestamp = Date.parse(incident.first_seen || '');
-        if (Number.isFinite(timestamp)) return timestamp;
-      }
+      // Compare full timestamps for every source, including the combined view.
+      const timestamp = Date.parse(incident?.reported_at || incident?.first_seen || '');
+      if (Number.isFinite(timestamp)) return timestamp;
       const raw = incident?.time;
       if (raw != null && String(raw).trim() !== '') {
         const normalized = Number(String(raw).padStart(4, '0'));
         if (!Number.isNaN(normalized)) return normalized;
-      }
-      if (incident?.first_seen) {
-        const parsed = Date.parse(incident.first_seen);
-        return Number.isNaN(parsed) ? 0 : parsed;
       }
       return 0;
     }
@@ -1939,7 +1934,7 @@
           ${incident.source === 'lakecharles' ? '<div class="popup-detail">Closed police call · 24h publication delay</div>' : ''}
           <div class="popup-detail"><span class="popup-label">Location</span>${escapeHtml(locationStr)}</div>
           ${approximate ? '<div class="popup-detail"><span class="popup-label">Map</span><span class="location-accuracy-note">Approximate Location</span></div>' : ''}
-          <div class="popup-detail"><span class="popup-label">Time</span>${escapeHtml(incidentTimeLabel(incident))}</div>
+          <div class="popup-detail" title="Source-reported Central time. For undated feeds, date is estimated from first observation."><span class="popup-label">Time</span>${escapeHtml(incidentTimeLabel(incident))}</div>
           <div class="popup-detail"><span class="popup-label">Agency</span>${escapeHtml(agencyDisplay)} &bull; ${escapeHtml(unitLabel)}</div>
           <div class="popup-detail"><span class="popup-label">Severity</span>${escapeHtml(sev.toUpperCase())}</div>
           <a class="popup-link" href="${gmaps}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>
@@ -2106,12 +2101,11 @@
     }
     
     function incidentTimeLabel(incident) {
-      if (incident?.source === 'lakecharles') {
-        const timestamp = Date.parse(incident.first_seen || '');
-        if (Number.isFinite(timestamp)) {
-          const date = new Date(timestamp).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric' });
-          return `${date} · ${formatTime(incident.time)}`;
-        }
+      const original = ['lakecharles', 'neworleans'].includes(incident?.source) ? incident.first_seen : '';
+      const timestamp = Date.parse(incident?.reported_at || original || '');
+      if (Number.isFinite(timestamp)) {
+        const date = new Date(timestamp).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric' });
+        return `${date.replace(' ', '-')} ${formatTime(incident.time)}`;
       }
       return formatTime(incident?.time);
     }
@@ -2133,11 +2127,11 @@
       const shareId = getIncidentShareId(incident);
       
       return `
-        <div class="incident-card ${sevClass} ${isNew ? 'new' : ''}${interactiveClass}${incident.source === 'lakecharles' ? ' delayed-call' : ''}"
+        <div class="incident-card ${sevClass} ${isNew ? 'new' : ''}${interactiveClass}${['lakecharles', 'neworleans'].includes(incident.source) || incident.reported_at ? ' dated-call' : ''}"
              data-id="${incident.id}"${interactionAttrs}>
           <div class="incident-header">
             <span class="incident-type">${escapeHtml(incident.description || 'Incident')}</span>
-            <span class="incident-time">${escapeHtml(incidentTimeLabel(incident))}</span>
+            <span class="incident-time" title="Source-reported Central time. For undated feeds, date is estimated from first observation.">${escapeHtml(incidentTimeLabel(incident))}</span>
           </div>
           <div class="incident-location">
             <span>${escapeHtml(locationText)}</span>
@@ -2231,7 +2225,7 @@
         </div>` : ''}
         <div class="incident-modal-detail">
           <span class="incident-modal-label">Time</span>
-          <span class="incident-modal-value">${escapeHtml(incidentTimeLabel(incident))}</span>
+          <span class="incident-modal-value" title="Source-reported Central time. For undated feeds, date is estimated from first observation.">${escapeHtml(incidentTimeLabel(incident))}</span>
         </div>
         <div class="incident-modal-detail">
           <span class="incident-modal-label">Agency</span>

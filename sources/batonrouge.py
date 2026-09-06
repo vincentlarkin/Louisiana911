@@ -39,6 +39,8 @@ def _parse_time_to_hhmm(value: str | None) -> str:
     hour = int(match.group(1))
     minute = int(match.group(2))
     ampm = match.group(3).upper()
+    if not (1 <= hour <= 12 and 0 <= minute <= 59):
+        return ""
     if hour == 12:
         hour = 0
     if ampm == "PM":
@@ -178,12 +180,21 @@ def scrape(*, user_agent: str, timeout_seconds: int = 15) -> tuple[list[dict], s
 
     soup = BeautifulSoup(response.text, "html.parser")
     refreshed_at_text = _extract_refreshed_at_text(soup)
+    count_match = re.search(r"Number of incidents\s*:\s*(\d+)",
+                            soup.get_text(" ", strip=True), re.IGNORECASE)
+    table = soup.find("table", class_="TabTraf")
+    expected_headers = ["Time", "Type", "Agency", "Location", "Cross Street"]
+    if (not refreshed_at_text or not count_match or table is None
+            or [_clean_ws(cell.get_text(" ", strip=True)) for cell in table.find_all("th")] != expected_headers):
+        raise ValueError("Baton Rouge traffic table or snapshot count is unrecognized")
 
     incidents: list[dict] = []
-    for row in soup.find_all("tr"):
+    for row in table.find_all("tr"):
         cells = row.find_all("td")
-        if len(cells) < 5:
+        if not cells:
             continue
+        if len(cells) != 5:
+            raise ValueError("Baton Rouge traffic row has an unexpected layout")
 
         time_raw = _clean_ws(cells[0].get_text(" ", strip=True))
         incident_type = _clean_ws(cells[1].get_text(" ", strip=True))
@@ -191,8 +202,9 @@ def scrape(*, user_agent: str, timeout_seconds: int = 15) -> tuple[list[dict], s
         location = _clean_ws(cells[3].get_text(" ", strip=True))
         cross_street = _clean_ws(cells[4].get_text(" ", strip=True))
 
-        if not incident_type:
-            continue
+        time_val = _parse_time_to_hhmm(time_raw)
+        if not incident_type or not time_val:
+            raise ValueError("Baton Rouge traffic row could not be parsed")
 
         street, cross_streets = _split_location(location, cross_street)
 
@@ -200,7 +212,7 @@ def scrape(*, user_agent: str, timeout_seconds: int = 15) -> tuple[list[dict], s
             {
                 "source": "batonrouge",
                 "agency": agency or "UNKNOWN",
-                "time": _parse_time_to_hhmm(time_raw),
+                "time": time_val,
                 "units": 1,
                 "description": incident_type,
                 "street": street,
@@ -208,6 +220,12 @@ def scrape(*, user_agent: str, timeout_seconds: int = 15) -> tuple[list[dict], s
                 "municipality": "Baton Rouge",
             }
         )
+
+    if len(incidents) != int(count_match.group(1)):
+        raise ValueError("Baton Rouge traffic snapshot is incomplete")
+
+    if not incidents:
+        return incidents, refreshed_at_text
 
     # The City-Parish publishes the same active CAD traffic incidents in an
     # official ArcGIS layer with approximate map points. Treat that layer as

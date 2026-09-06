@@ -48,8 +48,8 @@ test('delayed calls sort by original date across midnight and display Louisiana 
   const older = { source: 'lakecharles', time: '2355', first_seen: '2026-09-03T04:55:00Z' };
   const newer = { source: 'lakecharles', time: '0010', first_seen: '2026-09-03T05:10:00Z' };
   assert.ok(ctx._incidentTimeValue(newer) > ctx._incidentTimeValue(older));
-  assert.match(ctx.incidentTimeLabel(older), /Sep 2/);
-  assert.match(ctx.incidentTimeLabel(newer), /Sep 3/);
+  assert.match(ctx.incidentTimeLabel(older), /Sep-2/);
+  assert.match(ctx.incidentTimeLabel(newer), /Sep-3/);
 });
 
 test('Lake Charles has its own source and cannot be labeled active or breaking', () => {
@@ -61,6 +61,29 @@ test('Lake Charles has its own source and cannot be labeled active or breaking',
   assert.equal(state.veryActive, false);
   assert.match(state.label, /CLOSED CALL/);
   assert.equal(ctx.formatUnitCount(0), 'Units not listed');
+});
+
+test('Caddo keeps the reported clock and anchored date across midnight in every view', () => {
+  const ctx = loadFunctions(['formatTime', '_incidentTimeValue', 'incidentTimeLabel']);
+  const older = { source: 'caddo', time: '2350', reported_at: '2026-09-05T04:50:00+00:00',
+    first_seen: '2026-09-05T05:16:47.404955+00:00', last_seen: '2026-09-06T07:00:00Z' };
+  const newer = { source: 'caddo', time: '0010', reported_at: '2026-09-05T05:10:00+00:00' };
+  assert.equal(ctx.incidentTimeLabel(older), 'Sep-4 23:50');
+  assert.equal(ctx.incidentTimeLabel(newer), 'Sep-5 00:10');
+  assert.ok(ctx._incidentTimeValue(newer) > ctx._incidentTimeValue(older));
+  assert.equal(ctx.incidentTimeLabel({ source: 'caddo', time: '1234' }), '12:34');
+  assert.equal(ctx.incidentTimeLabel({ source: 'batonrouge', time: '1234' }), '12:34');
+  const otherSource = { source: 'batonrouge', time: '0020', first_seen: '2026-09-05T05:20:00Z' };
+  assert.ok(ctx._incidentTimeValue(otherSource) > ctx._incidentTimeValue(newer));
+});
+
+test('every feed displays its reported date and keeps the source clock unchanged', () => {
+  const ctx = loadFunctions(['formatTime', 'incidentTimeLabel']);
+  for (const source of ['caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles']) {
+    const call = { source, time: '2350', reported_at: '2026-09-02T04:50:00Z',
+      first_seen: '2026-09-05T05:10:00Z', last_seen: '2026-09-06T12:00:00Z' };
+    assert.equal(ctx.incidentTimeLabel(call), 'Sep-1 23:50', source);
+  }
 });
 
 test('Lake Charles delay notice stays honest when no recent calls are available', () => {
@@ -145,6 +168,19 @@ function liveContext() {
   return { ctx, requests };
 }
 const response = data => ({ ok: true, json: async () => data });
+
+test('a removed Caddo call leaves the live map even when the response is empty', async () => {
+  const { ctx, requests } = liveContext();
+  const first = ctx.updateIncidents();
+  requests[0].resolve(response([incident]));
+  await first;
+  assert.equal(ctx.rendered.length, 1);
+  const next = ctx.updateIncidents();
+  requests[1].resolve(response([]));
+  await next;
+  assert.equal(ctx.rendered.length, 0);
+  assert.equal(ctx.currentIncidents.length, 0);
+});
 
 test('a slow old feed response cannot replace the newest response', async () => {
   const { ctx, requests } = liveContext();
