@@ -43,6 +43,8 @@ Single transparent triangles are the default. Settings includes a saved **Circle
 
 Colors are a visual organization aid, not an official emergency classification.
 
+In History, **Major events 5+** beside the severity buttons filters the selected day to incidents with at least five recorded units. It combines with source, agency, and severity filters and applies to both the list and map. Historical major events pulse in either marker style; this does not mean the incident is still active. The collector preserves the highest observed unit count as assignments change. Older records use their saved unit count because earlier peaks cannot be reconstructed.
+
 ## Important Limits
 
 Louisiana911 reflects what each public source publishes. It is not a complete record of emergency activity, dispatch operations, response status, or final outcomes. Times, descriptions, units, and locations can change at the source.

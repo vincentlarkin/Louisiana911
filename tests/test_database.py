@@ -136,7 +136,7 @@ class DatabaseTests(unittest.TestCase):
     def test_archive_refreshes_existing_copy_and_reuses_database_pages(self):
         conn = app.db_connect()
         self.insert(conn, 'archived-call', '2020-01-01T12:00:00+00:00')
-        conn.execute("UPDATE incidents SET description='original' WHERE hash='archived-call'")
+        conn.execute("UPDATE incidents SET description='original', units=2, peak_units=8 WHERE hash='archived-call'")
         conn.commit(); conn.close()
         queries = []
         connect = app.db_connect
@@ -151,12 +151,42 @@ class DatabaseTests(unittest.TestCase):
         conn = app.db_connect()
         self.assertEqual(conn.execute('SELECT COUNT(*) FROM incidents').fetchone()[0], 0)
         self.insert(conn, 'archived-call', '2020-01-01T12:00:00+00:00')
-        conn.execute("UPDATE incidents SET description='corrected' WHERE hash='archived-call'")
+        conn.execute("UPDATE incidents SET description='corrected', units=1, peak_units=3 WHERE hash='archived-call'")
         conn.commit(); conn.close()
         app.archive_old_incidents()
         conn = app._archive_db_connect(result['files'][0])
         self.addCleanup(conn.close)
         self.assertEqual(conn.execute('SELECT description FROM incidents').fetchall(), [('corrected',)])
+        self.assertEqual(conn.execute('SELECT units, peak_units FROM incidents').fetchall(), [(1, 8)])
+
+    def test_unit_peak_survives_winding_down_and_departure_into_history(self):
+        call = dict(source='caddo', agency='SFD', time='1200', units=2, description='FIRE',
+                    street='TEST ST', cross_streets='MAIN ST', municipality='SHV')
+        geo = dict(lat=32.5, lng=-93.7, source='arcgis', quality='street+cross', query='test')
+        with patch.object(app, '_incident_geocode_result', return_value=geo):
+            for count in (2, 6, 1):
+                app.process_incidents([{**call, 'units': count}])
+            app.process_incidents([], allow_empty=True)
+        conn = app.db_connect(row_factory=True)
+        self.addCleanup(conn.close)
+        row = dict(conn.execute('SELECT * FROM incidents').fetchone())
+        self.assertEqual((row['units'], row['peak_units'], row['is_active']), (1, 6, 0))
+        self.assertEqual(app._public_incident(row)['peak_units'], 6)
+        day = app._parse_iso_datetime(row['first_seen']).astimezone(app.CENTRAL_TZ).date().isoformat()
+        result, status = self.history('date=' + day)
+        self.assertEqual(status, 200)
+        self.assertEqual(result['incidents'][0]['peak_units'], 6)
+
+    def test_peak_migration_seeds_legacy_counts_once_without_lowering_peaks(self):
+        conn = sqlite3.connect(':memory:')
+        self.addCleanup(conn.close)
+        conn.execute('CREATE TABLE incidents(units INTEGER)')
+        conn.executemany('INSERT INTO incidents VALUES (?)', [(6,), (None,), (0,)])
+        app._init_peak_units(conn.cursor())
+        self.assertEqual(conn.execute('SELECT peak_units FROM incidents').fetchall(), [(6,), (None,), (0,)])
+        conn.execute('UPDATE incidents SET units=1 WHERE peak_units=6')
+        app._init_peak_units(conn.cursor())
+        self.assertEqual(conn.execute('SELECT peak_units FROM incidents WHERE units=1').fetchone()[0], 6)
 
     def test_archive_does_not_delete_incident_changed_since_snapshot(self):
         conn = app.db_connect()
