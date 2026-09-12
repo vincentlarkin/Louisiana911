@@ -160,7 +160,7 @@ class CanonicalOriginTests(unittest.TestCase):
 
     def test_versioned_shell_assets_are_immutable(self):
         for path in (
-            '/analytics.js?v=4.6.0',
+            '/analytics.js?v=4.8.0',
             '/styles.css?v=4.3.6',
             '/service-worker.js?v=4.3.6',
             '/manifest.webmanifest?v=4.3.6',
@@ -195,8 +195,8 @@ class CanonicalOriginTests(unittest.TestCase):
                 response = self.client.get(path, headers={'Host': 'localhost'})
                 self.assertEqual(200, response.status_code)
                 html = response.get_data(as_text=True)
-                self.assertEqual(1, html.count('/analytics.js?v=4.6.0'))
-                self.assertIn('<script defer src="/analytics.js?v=4.6.0"></script>', html)
+                self.assertEqual(1, html.count('/analytics.js?v=4.8.0'))
+                self.assertIn('<script defer src="/analytics.js?v=4.8.0"></script>', html)
                 self.assertNotIn('googletagmanager.com/gtag/js', html)
 
     def test_sitemap_contains_only_complete_canonical_indexable_pages(self):
@@ -219,7 +219,7 @@ class CanonicalOriginTests(unittest.TestCase):
         self.assertIn('Disallow: /api/', robots)
 
     def test_analytics_bundle_includes_key_engagement_events(self):
-        response = self.client.get('/analytics.js?v=4.6.0', headers={'Host': 'localhost'})
+        response = self.client.get('/analytics.js?v=4.8.0', headers={'Host': 'localhost'})
         self.assertEqual(200, response.status_code)
         javascript = response.get_data(as_text=True)
         for event_name in (

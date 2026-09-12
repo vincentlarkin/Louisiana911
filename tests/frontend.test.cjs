@@ -219,6 +219,32 @@ test('a slow old feed response cannot replace the newest response', async () => 
   assert.equal(ctx.rendered[0].description, 'NEW');
 });
 
+test('feed telemetry reports displayed outcomes and ignores superseded failures', async () => {
+  const { ctx, requests } = liveContext();
+  const outcomes = [];
+  ctx.window.louisiana911Analytics = { feedResult: result => outcomes.push(result) };
+  ctx.hasValidLocation = i => i.latitude != null && i.longitude != null;
+  ctx.console = { error() {} };
+  const old = ctx.updateIncidents();
+  const latest = ctx.updateIncidents();
+  requests[1].resolve(response([incident, { ...incident, id: 2, latitude: null }]));
+  await latest;
+  requests[0].resolve({ ok: true, json: async () => { throw new Error('old bad data'); } });
+  await old;
+  assert.equal(outcomes.length, 1);
+  assert.equal(outcomes[0].outcome, 'success');
+  assert.equal(outcomes[0].count, 2);
+  assert.equal(outcomes[0].mappableCount, 1);
+  const empty = ctx.updateIncidents();
+  requests[2].resolve(response([]));
+  await empty;
+  assert.equal(outcomes[1].count, 0);
+  const failed = ctx.updateIncidents();
+  requests[3].resolve({ ok: true, json: async () => { throw new Error('bad response'); } });
+  await failed;
+  assert.equal(outcomes[2].outcome, 'error');
+});
+
 test('a source switch discards the previous source response', async () => {
   const { ctx, requests } = liveContext();
   const pending = ctx.updateIncidents();

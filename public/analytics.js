@@ -6,6 +6,8 @@
   window.__louisiana911AnalyticsLoaded = true;
 
   const MEASUREMENT_ID = 'G-WHHVE8V5DW';
+  const TRACKING_VERSION = '4.8.0';
+  let lastFeedResult = '';
   const STARTED_AT = performance.now();
   const PAGE_TYPE = getPageType();
   const SCROLL_MILESTONES = [10, 25, 50, 75, 90, 100];
@@ -46,7 +48,8 @@
 
   // Public hook for richer feature-specific events without another dependency.
   window.louisiana911Analytics = Object.freeze({
-    track: (name, parameters = {}) => track(name, parameters)
+    track: (name, parameters = {}) => track(name, parameters),
+    feedResult: reportFeedResult
   });
 
   loadGoogleTag();
@@ -118,6 +121,9 @@
     const eventParameters = {
       page_type: PAGE_TYPE,
       source_view: getSourceView(),
+      view_mode: getViewMode(),
+      incident_tab: getIncidentTab(),
+      tracking_version: TRACKING_VERSION,
       ...parameters,
       transport_type: 'beacon'
     };
@@ -127,6 +133,29 @@
       }
     });
     window.gtag('event', name, eventParameters);
+  }
+
+  function reportFeedResult({ source, outcome, count = 0, mappableCount = 0, loadMs = 0, httpStatus = 0 }) {
+    if (document.visibilityState !== 'visible' || source !== getSourceView() || getIncidentTab() !== 'live') return;
+    if (!['success', 'error'].includes(outcome)) return;
+    const resultState = outcome === 'error' ? 'error' : count > 0 ? 'ready' : 'empty';
+    const signature = `${source}:${resultState}`;
+    if (signature === lastFeedResult) return;
+    lastFeedResult = signature;
+    track(outcome === 'error' ? 'feed_load_error' : 'feed_view', {
+      result_state: resultState,
+      ...(outcome === 'success' ? { result_count: Math.max(0, count), mappable_count: Math.max(0, mappableCount) } : {}),
+      load_ms: roundedDuration(loadMs),
+      http_status: Math.max(0, Number(httpStatus) || 0)
+    });
+  }
+
+  function getViewMode() {
+    return document.querySelector('[data-view-mode].active')?.dataset.viewMode || '';
+  }
+
+  function getIncidentTab() {
+    return document.querySelector('[data-tab].active')?.dataset.tab || '';
   }
 
   function trackClick(event) {
@@ -161,11 +190,14 @@
     if (!feature) return;
     const data = feature.dataset;
     if (data.source && ['all', 'caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles'].includes(data.source)) {
-      track('source_select', { source_view: data.source });
+      const previousSource = getSourceView();
+      if (previousSource !== data.source) lastFeedResult = '';
+      track('source_select', { source_view: data.source, previous_source: previousSource });
     } else if (['map', 'list'].includes(data.viewMode)) {
       track('view_mode_select', { view_mode: data.viewMode });
     } else if (['live', 'history'].includes(data.tab)) {
-      track('incident_tab_select', { view_mode: data.tab });
+      if (getIncidentTab() !== data.tab) lastFeedResult = '';
+      track('incident_tab_select', { incident_tab: data.tab });
     } else if (data.basemap) {
       track('basemap_select', { control_value: cleanToken(data.basemap, 40) });
     } else {

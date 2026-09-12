@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en-US">
 <head>
-  <script defer src="/analytics.js?v=4.6.0"></script>
+  <script defer src="/analytics.js?v=4.8.0"></script>
   <meta charset="UTF-8">
   <script type="application/json" id="map-config">{}</script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -1990,6 +1990,13 @@
         alt: markerLabel(incident),
       });
 
+      marker.on('popupopen', () => {
+        const activeIncident = marker.incidentData || incident;
+        window.louisiana911Analytics?.track('incident_open', {
+          source_view: normalizeSource(activeIncident?.source), incident_tab: marker.incidentMode || mode,
+          severity: getSeverity(activeIncident), control_value: 'popup'
+        });
+      });
       // Right-click → open in Google Maps (useful on desktop)
       marker.on('contextmenu', () => {
         const activeIncident = marker.incidentData || incident;
@@ -2228,6 +2235,12 @@
 
     function openIncidentDialog(incident, { mode = 'live' } = {}) {
       if (!incidentModal || !incidentModalTitle || !incidentModalBody || !incidentModalMaps) return;
+      if (!incidentModal.classList.contains('open') || incidentModalIncident?.id !== incident?.id || incidentModalIncident?.source !== incident?.source) {
+        window.louisiana911Analytics?.track('incident_open', {
+          source_view: normalizeSource(incident?.source), incident_tab: mode,
+          severity: getSeverity(incident), control_value: 'dialog'
+        });
+      }
 
       const sev = getSeverity(incident);
       const agencyDisplay = formatAgencyDisplay(incident);
@@ -2638,12 +2651,15 @@
     async function updateIncidents() {
       const requestId = ++liveRequestId;
       const requestedSource = currentSource;
+      const requestStartedAt = Date.now();
+      let httpStatus = 0;
       try {
         let response = await fetch(`api/incidents/active?${sourceQueryParam()}`);
         if (!response.ok && requestedSource !== 'all') {
           // Backward-compat fallback for deployments where source-param filtering is unavailable.
           response = await fetch('api/incidents/active?source=all');
         }
+        httpStatus = response.status || 0;
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         let allIncidents = await response.json();
@@ -2688,8 +2704,17 @@
         // Update map + list (filtered)
         setMapMarkers(incidents, { mode: 'live' });
         renderIncidentList(incidents);
+        window.louisiana911Analytics?.feedResult?.({
+          source: requestedSource, outcome: 'success', count: incidents.length,
+          mappableCount: incidents.filter(hasValidLocation).length,
+          loadMs: Date.now() - requestStartedAt, httpStatus
+        });
         
       } catch (error) {
+        if (requestId !== liveRequestId || requestedSource !== currentSource) return;
+        window.louisiana911Analytics?.feedResult?.({
+          source: requestedSource, outcome: 'error', loadMs: Date.now() - requestStartedAt, httpStatus
+        });
         console.error('Failed to fetch incidents:', error);
       }
     }
@@ -2791,6 +2816,9 @@
       historyMajorEventsOnly = !historyMajorEventsOnly;
       historyMajorEventsButton.classList.toggle('active', historyMajorEventsOnly);
       historyMajorEventsButton.setAttribute('aria-pressed', String(historyMajorEventsOnly));
+      window.louisiana911Analytics?.track('incident_filter', {
+        control_name: 'major_events', control_value: historyMajorEventsOnly ? 'on' : 'off', incident_tab: 'history'
+      });
       historyPage = 1;
       refreshFilteredView();
       focusMapOnCurrentFilteredIncidents();
@@ -3051,6 +3079,7 @@
     let historyRequestId = 0;
     async function loadHistory(date) {
       const requestId = ++historyRequestId;
+      const requestStartedAt = Date.now();
       const source = currentSource;
       const isCurrent = () => requestId === historyRequestId && source === currentSource && date === historySelectedDate;
       currentHistoryIncidents = [];
@@ -3125,7 +3154,11 @@
 
         // Replace map markers with history results when History tab is active
         if (historyVisible) {
-          window.louisiana911Analytics?.track('history_view', { source_view: source, result_count: total });
+          window.louisiana911Analytics?.track('history_view', {
+            source_view: source, result_count: getHistoryFilteredTotal(), incident_tab: 'history',
+            result_state: getHistoryFilteredTotal() > 0 ? 'ready' : 'empty',
+            load_ms: Date.now() - requestStartedAt
+          });
           if (showAllHistoryOnMap && allHistoryIncidentsForDay.length > 0) {
             // Show all incidents for the day on map
             const allFiltered = getFilteredIncidents(allHistoryIncidentsForDay, currentFilter, currentUrgencyFilter);
@@ -3577,6 +3610,7 @@
 
     function setSort(mode) {
       currentSort = mode === 'urgency' ? 'urgency' : 'recent';
+      window.louisiana911Analytics?.track('incident_sort', { control_value: currentSort });
       sortMenu?.querySelectorAll('.sort-option').forEach(option => {
         option.classList.toggle('active', option.dataset.sort === currentSort);
       });
@@ -3742,7 +3776,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.7.0', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.8.0', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
