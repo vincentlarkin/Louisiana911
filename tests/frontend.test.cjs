@@ -402,9 +402,9 @@ test('new visitors get triangles and saved shape/view choices survive initializa
   assert.doesNotThrow(() => vm.runInContext("preferences.set('test','value')", restricted.context));
 });
 
-test('five-unit pulse follows marker shape and stops for history or lower unit counts', () => {
+test('five-unit pulse follows marker shape and preserves historical peaks', () => {
   const layers = new Set();
-  const ctx = loadFunctions(['shouldPulseForUnits', 'unitPulseIcon', 'createUnitPulseRing', 'removeUnitPulseRing', 'syncUnitPulseRing'], {
+  const ctx = loadFunctions(['isMajorEvent', 'shouldPulseForUnits', 'unitPulseIcon', 'createUnitPulseRing', 'removeUnitPulseRing', 'syncUnitPulseRing'], {
     UNIT_PULSE_THRESHOLD: 5, triangleMarkers: true,
     incidentCoordinatePair: i => i.latitude == null ? null : [i.latitude, i.longitude],
     _markerSymbolSizePixels: () => 19, getSeverity: () => 'high', getSeverityColor: () => '#ff3b3b',
@@ -429,12 +429,68 @@ test('five-unit pulse follows marker shape and stops for history or lower unit c
   ctx.syncUnitPulseRing(marker, { ...call, units: 4 }, 'live');
   assert.equal(layers.size, 0);
   assert.equal(marker._unitPulseRing, null);
-  ctx.syncUnitPulseRing(marker, call, 'history');
+  ctx.syncUnitPulseRing(marker, { ...call, is_active: 0, units: 1, peak_units: 6 }, 'history');
+  assert.equal(layers.size, 1);
+  ctx.syncUnitPulseRing(marker, { ...call, units: 1, peak_units: 6 }, 'live');
   assert.equal(layers.size, 0);
   ctx.syncUnitPulseRing(marker, call, 'live');
   assert.equal(layers.size, 1);
   ctx.syncUnitPulseRing(marker, { ...call, latitude: null }, 'live');
   assert.equal(layers.size, 0);
+});
+
+test('major history filter composes with severity, paginates matches and leaves live unchanged', () => {
+  const ctx = loadFunctions(['isMajorEvent', 'matchesHistoryMajorFilter', 'matchesFilters',
+    'getFilteredIncidents', 'getHistoryFilteredTotal', 'getHistoryPageData', 'incidentActivityState',
+    'incidentUnitLabel', 'formatUnitCount'], {
+    UNIT_PULSE_THRESHOLD: 5, mapMode: 'history', historyMajorEventsOnly: true,
+    currentFilter: 'all', currentUrgencyFilter: 'all', historyHasAllIncidents: true,
+    historyPage: 9, historyPageSize: 2, currentSort: 'recent',
+    matchesSourceFilter: i => i.source === 'caddo', matchesActiveUnitFilters: () => true,
+    matchesUrgencyFilter: (i, severity) => severity === 'all' || severity === i.severity,
+    sortIncidents: items => [...items].sort((a, b) => b.id - a.id),
+  });
+  const items = [
+    { id: 1, source: 'caddo', units: 1, peak_units: 6, is_active: 0, severity: 'low' },
+    { id: 2, source: 'caddo', units: '5', is_active: 0, severity: 'high' },
+    { id: 3, source: 'caddo', units: 8, is_active: 0, severity: 'high' },
+    { id: 4, source: 'caddo', units: 4, severity: 'high' },
+    { id: 5, source: 'lafayette', units: 10, severity: 'high' },
+  ];
+  ctx.currentHistoryIncidents = items;
+  assert.equal(ctx.getHistoryFilteredTotal(), 3);
+  assert.deepEqual(Array.from(ctx.getHistoryPageData(items).pageData, i => i.id), [1]);
+  assert.equal(ctx.historyPage, 2);
+  ctx.currentUrgencyFilter = 'high';
+  assert.deepEqual(Array.from(ctx.getHistoryPageData(items).pageData, i => i.id), [3, 2]);
+  assert.equal(ctx.historyPage, 1);
+  const historical = ctx.incidentActivityState(items[0], 'history');
+  assert.equal(historical.active, false);
+  assert.equal(historical.veryActive, false);
+  assert.match(ctx.incidentUnitLabel(items[0]), /1 unit · peak 6/);
+  ctx.mapMode = 'live';
+  assert.equal(ctx.getFilteredIncidents(items).length, 3);
+  ctx.mapMode = 'history';
+  ctx.historyMajorEventsOnly = false;
+  assert.equal(ctx.getFilteredIncidents(items).length, 3);
+  for (const units of [undefined, null, '', 'unknown', 0, 4, Infinity]) {
+    assert.equal(ctx.isMajorEvent({ units }, 'history'), false);
+  }
+});
+
+test('an empty major-event result preserves selected severity and agency filters', () => {
+  const ctx = loadFunctions(['updateFilterButtonVisibility'], {
+    mapMode: 'history', historyMajorEventsOnly: true,
+    currentFilter: 'police', currentBatonRougeAgency: 'law', currentLafayetteUnit: 'fire',
+    currentUrgencyFilter: 'high', caddoFilterButtons: [], batonRougeFilterButtons: [],
+    lafayetteFilterButtons: [], urgencyFilterButtons: [],
+    matchesHistoryMajorFilter: () => false,
+  });
+  ctx.updateFilterButtonVisibility([{ units: 1 }]);
+  assert.equal(ctx.currentFilter, 'police');
+  assert.equal(ctx.currentBatonRougeAgency, 'law');
+  assert.equal(ctx.currentLafayetteUnit, 'fire');
+  assert.equal(ctx.currentUrgencyFilter, 'high');
 });
 
 test('history notices respect hour-long Retry-After values', () => {

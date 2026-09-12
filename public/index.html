@@ -83,7 +83,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.5.2" />
+  <link rel="stylesheet" href="styles.css?v=4.7.0" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -417,6 +417,9 @@
             </button>
             <button class="filter-btn urgency-btn urgency-custody" type="button" data-urgency="custody" title="Custody/Prisoner">
               <span class="urgency-dot"></span>
+            </button>
+            <button class="filter-btn major-events-btn hidden" id="history-major-events" type="button" aria-pressed="false" title="Only major events: 5 or more recorded units">
+              <span aria-hidden="true">◎</span> Major events <span class="major-events-threshold">5+</span>
             </button>
           </div>
         </div>
@@ -1011,6 +1014,7 @@
     let currentBatonRougeAgency = 'all'; // 'all' | 'law' | 'oss'
     let currentFilter = 'all';  // Agency filter
     let currentUrgencyFilter = 'all';  // Urgency/severity filter
+    let historyMajorEventsOnly = false;
     let currentSort = 'recent'; // 'recent' | 'urgency'
     let mapMode = 'live'; // 'live' | 'history'
     let historyPage = 1;
@@ -1022,7 +1026,8 @@
     const caddoFilterButtons = Array.from(document.querySelectorAll('.filter-group[data-filter-type="agency-caddo"] .filter-btn'));
     const batonRougeFilterButtons = Array.from(document.querySelectorAll('.filter-group[data-filter-type="agency-batonrouge"] .filter-btn'));
     const lafayetteFilterButtons = Array.from(document.querySelectorAll('.filter-group[data-filter-type="agency-lafayette"] .filter-btn'));
-    const urgencyFilterButtons = Array.from(document.querySelectorAll('.filter-group[data-filter-type="urgency"] .filter-btn'));
+    const urgencyFilterButtons = Array.from(document.querySelectorAll('.filter-group[data-filter-type="urgency"] [data-urgency]'));
+    const historyMajorEventsButton = document.getElementById('history-major-events');
 
     function formatPublishedAge(milliseconds) {
       const minutes = Math.max(0, Math.floor(milliseconds / 60000));
@@ -1379,7 +1384,8 @@
       return (
         matchesSourceFilter(incident) &&
         matchesActiveUnitFilters(incident) &&
-        matchesUrgencyFilter(incident, urgencyFilter)
+        matchesUrgencyFilter(incident, urgencyFilter) &&
+        matchesHistoryMajorFilter(incident)
       );
     }
     
@@ -1434,8 +1440,18 @@
       return incidents.filter(inc => matchesFilters(inc, af, uf));
     }
 
+    function matchesHistoryMajorFilter(incident) {
+      return mapMode !== 'history' || !historyMajorEventsOnly || isMajorEvent(incident, 'history');
+    }
+
+    function getHistoryFilteredTotal() {
+      return getFilteredIncidents(currentHistoryIncidents).length;
+    }
+
     function getHistoryPageData(incidents) {
       const filtered = getFilteredIncidents(incidents, currentFilter, currentUrgencyFilter);
+      const totalPages = Math.max(1, Math.ceil(filtered.length / historyPageSize));
+      historyPage = Math.min(Math.max(historyPage, 1), totalPages);
       if (!historyHasAllIncidents) {
         if (currentSort === 'urgency') {
           return { pageData: sortIncidents(filtered), skipSort: true };
@@ -1508,6 +1524,7 @@
       };
 
       for (const inc of baseIncidents || []) {
+        if (!matchesHistoryMajorFilter(inc)) continue;
         const source = normalizeSource(inc?.source);
         const sev = getSeverity(inc);
         
@@ -1587,18 +1604,19 @@
       });
 
       // If the active agency filter has no incidents (after urgency filter), fall back to "all".
-      if (currentFilter !== 'all' && (caddoCounts[currentFilter] || 0) === 0) {
+      const preserveMajorFilters = mapMode === 'history' && historyMajorEventsOnly;
+      if (!preserveMajorFilters && currentFilter !== 'all' && (caddoCounts[currentFilter] || 0) === 0) {
         currentFilter = 'all';
       }
-      if (currentBatonRougeAgency !== 'all' && (batonRougeCounts[currentBatonRougeAgency] || 0) === 0) {
+      if (!preserveMajorFilters && currentBatonRougeAgency !== 'all' && (batonRougeCounts[currentBatonRougeAgency] || 0) === 0) {
         currentBatonRougeAgency = 'all';
       }
-      if (currentLafayetteUnit !== 'all' && (lafayetteCounts[currentLafayetteUnit] || 0) === 0) {
+      if (!preserveMajorFilters && currentLafayetteUnit !== 'all' && (lafayetteCounts[currentLafayetteUnit] || 0) === 0) {
         currentLafayetteUnit = 'all';
       }
 
       // If the active urgency filter has no incidents (after agency filter), fall back to "all".
-      if (currentUrgencyFilter !== 'all' && (urgencyCounts[currentUrgencyFilter] || 0) === 0) {
+      if (!preserveMajorFilters && currentUrgencyFilter !== 'all' && (urgencyCounts[currentUrgencyFilter] || 0) === 0) {
         currentUrgencyFilter = 'all';
       }
 
@@ -1855,9 +1873,20 @@
       return shareIncident(incident, { ...options, mode });
     };
 
+    function isMajorEvent(incident, mode = 'live') {
+      const counts = mode === 'history' ? [incident?.units, incident?.peak_units] : [incident?.units];
+      return counts.some(value => Number.isFinite(Number(value)) && Number(value) >= UNIT_PULSE_THRESHOLD);
+    }
+
+    function incidentUnitLabel(incident) {
+      const label = formatUnitCount(incident?.units);
+      const peak = Number(incident?.peak_units);
+      return Number(incident?.is_active) === 0 && Number.isFinite(peak) && peak > Number(incident?.units || 0)
+        ? `${label} · peak ${peak}` : label;
+    }
+
     function shouldPulseForUnits(incident, mode) {
-      const unitCount = Number(incident?.units);
-      return mode === 'live' && Number.isFinite(unitCount) && unitCount >= UNIT_PULSE_THRESHOLD;
+      return (mode === 'live' || mode === 'history') && isMajorEvent(incident, mode);
     }
 
     function createUnitPulseRing(incident) {
@@ -1926,7 +1955,7 @@
       const agencyDisplay = formatAgencyDisplay(incident);
       const locationStr = incidentLocationText(incident);
       const gmaps = googleMapsUrl(incident.latitude, incident.longitude);
-      const unitLabel = formatUnitCount(incident?.units);
+      const unitLabel = incidentUnitLabel(incident);
       const approximate = isApproximateLocation(incident);
       const shareId = getIncidentShareId(incident);
 
@@ -2117,7 +2146,7 @@
       const sev = getSeverity(incident);
       const sevClass = getSeverityClass(sev);
       const agencyDisplay = formatAgencyDisplay(incident);
-      const unitLabel = formatUnitCount(incident?.units);
+      const unitLabel = incidentUnitLabel(incident);
       const coordinates = incidentCoordinatePair(incident);
       const hasLocation = Boolean(coordinates) && !isUnknownLocation(incident);
       const interactiveClass = hasLocation ? ' is-actionable' : '';
@@ -2204,7 +2233,7 @@
       const agencyDisplay = formatAgencyDisplay(incident);
       const locationStr = incidentLocationText(incident);
       const municipality = incident?.municipality || 'Unknown';
-      const unitLabel = formatUnitCount(incident?.units);
+      const unitLabel = incidentUnitLabel(incident);
       const approximate = isApproximateLocation(incident);
       const coordinates = incidentCoordinatePair(incident);
       const canJumpToList = mode === 'history' && showAllHistoryOnMap && Number.isFinite(Number(incident?.id));
@@ -2758,6 +2787,18 @@
       focusMapOnCurrentFilteredIncidents();
     }
 
+    function toggleHistoryMajorEvents() {
+      historyMajorEventsOnly = !historyMajorEventsOnly;
+      historyMajorEventsButton.classList.toggle('active', historyMajorEventsOnly);
+      historyMajorEventsButton.setAttribute('aria-pressed', String(historyMajorEventsOnly));
+      historyPage = 1;
+      refreshFilteredView();
+      focusMapOnCurrentFilteredIncidents();
+      scrollHistoryListToTop();
+    }
+
+    historyMajorEventsButton?.addEventListener('click', toggleHistoryMajorEvents);
+
     // Refresh the view with current filters applied
     function refreshFilteredView() {
       const livePanel = document.getElementById('live-panel');
@@ -2774,6 +2815,8 @@
 
       if (historyVisible) {
         const { pageData, skipSort } = getHistoryPageData(currentHistoryIncidents);
+        updateHistoryCount(getHistoryFilteredTotal(), historySelectedDate);
+        updateHistoryPagination();
         renderHistoryList(pageData, historySelectedDate, { total: historyTotal, skipSort });
         
         // Use showAllHistoryOnMap setting for map markers
@@ -2888,15 +2931,7 @@
         setMapMarkers(filteredAll, { fit: true, mode: 'history' });
       } else {
         // Show only current page incidents
-        const filteredPage = getFilteredIncidents(currentHistoryIncidents, currentFilter, currentUrgencyFilter);
-        const offset = (historyPage - 1) * historyPageSize;
-        let pageData;
-        if (currentSort === 'urgency') {
-          const sortedAll = sortIncidents(filteredPage);
-          pageData = sortedAll.slice(offset, offset + historyPageSize);
-        } else {
-          pageData = filteredPage;
-        }
+        const { pageData } = getHistoryPageData(currentHistoryIncidents);
         setMapMarkers(pageData, { fit: true, mode: 'history' });
       }
     }
@@ -3083,7 +3118,7 @@
         }
         const { pageData, skipSort } = getHistoryPageData(currentHistoryIncidents);
         
-        if (historyVisible) updateHistoryCount(historyTotal, date);
+        if (historyVisible) updateHistoryCount(getHistoryFilteredTotal(), date);
         updateHistoryPagination();
         // Pass skipSort flag so we don't re-sort already-sorted urgency data
         renderHistoryList(pageData, date, { total: historyTotal, skipSort });
@@ -3115,7 +3150,7 @@
       if (!countWrap || !countValue) return;
       const isToday = Boolean(date && date === isoToday);
       if (countLabel) {
-        countLabel.textContent = isToday ? 'Today' : 'Incidents';
+        countLabel.textContent = historyMajorEventsOnly ? 'Major events' : isToday ? 'Today' : 'Incidents';
       }
       countWrap.classList.toggle('today', isToday);
       countWrap.classList.toggle('incidents', !isToday);
@@ -3130,7 +3165,7 @@
       const next = document.getElementById('history-next');
       if (!pagination || !status || !prev || !next) return;
 
-      const totalPages = Math.max(1, Math.ceil(historyTotal / historyPageSize));
+      const totalPages = Math.max(1, Math.ceil(getHistoryFilteredTotal() / historyPageSize));
       historyPage = Math.min(Math.max(historyPage, 1), totalPages);
       status.textContent = `Page ${historyPage} of ${totalPages}`;
       prev.disabled = historyPage <= 1;
@@ -3146,7 +3181,7 @@
       const sorted = skipSort ? incidents : sortIncidents(incidents);
       const signature = buildIncidentListSignature(
         sorted,
-        `history:${date || 'none'}:${total}:${historyPage}:${currentSource}:${currentSort}:${currentFilter}:${currentBatonRougeAgency}:${currentLafayetteUnit}:${currentUrgencyFilter}`
+        `history:${date || 'none'}:${total}:${historyPage}:${currentSource}:${currentSort}:${currentFilter}:${currentBatonRougeAgency}:${currentLafayetteUnit}:${currentUrgencyFilter}:${historyMajorEventsOnly}`
       );
       if (signature === lastHistoryListSignature) return;
       lastHistoryListSignature = signature;
@@ -3179,7 +3214,7 @@
         listEl.innerHTML = `
           <div class="empty-state">
             <div class="empty-state-mark" aria-hidden="true"></div>
-            <p>No ${filterLabelStr} for</p>
+            <p>No ${historyMajorEventsOnly ? 'major events matching these filters' : filterLabelStr} for</p>
             <p class="empty-state-date">${dateLabel}</p>
             <p class="empty-state-detail">Try another filter combination or date.</p>
           </div>
@@ -3395,7 +3430,7 @@
     });
 
     historyNext?.addEventListener('click', () => {
-      const totalPages = Math.max(1, Math.ceil(historyTotal / historyPageSize));
+      const totalPages = Math.max(1, Math.ceil(getHistoryFilteredTotal() / historyPageSize));
       if (historyPage >= totalPages) return;
       historyPage += 1;
       loadHistory(historySelectedDate);
@@ -3485,6 +3520,7 @@
         const tabName = tab.dataset.tab;
         document.getElementById('live-panel').classList.toggle('hidden', tabName !== 'live');
         document.getElementById('history-panel').classList.toggle('hidden', tabName !== 'history');
+        historyMajorEventsButton?.classList.toggle('hidden', tabName !== 'history');
         updateSourceDelayBanner();
         
         if (tabName === 'history') {
@@ -3706,7 +3742,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.5.2', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.7.0', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);

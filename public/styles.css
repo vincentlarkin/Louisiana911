@@ -428,7 +428,7 @@
     }
     
     .legend-content {
-      padding-right: 32px; /* keep space for the collapse arrow */
+      padding-right: 0;
       max-height: 420px;
       overflow: hidden;
       opacity: 1;
@@ -473,10 +473,15 @@
     
     .legend-container.collapsed .map-overlay {
       width: 34px;
-      padding: 28px 6px 8px;
+      padding: 31px 6px 10px;
       border-radius: 12px;
       height: auto;
-      min-height: 70px;
+      min-height: 0;
+    }
+
+    .legend-container.collapsed .legend-collapse {
+      right: 50%;
+      transform: translateX(50%);
     }
     
     .legend-container.collapsed .legend-content {
@@ -494,9 +499,10 @@
     }
     
     .legend-container.collapsed .legend-mini {
+      position: static;
       opacity: 1;
       visibility: visible;
-      transform: translate(-50%, 0) scale(1);
+      transform: none;
       transition:
         opacity 0.14s ease 0.06s,
         transform 0.2s ease 0.04s,
@@ -1232,6 +1238,17 @@
       border-color: rgba(255, 59, 59, 0.38);
       color: var(--text);
       box-shadow: none;
+    }
+
+    .major-events-btn {
+      min-height: 28px;
+      padding: 4px 8px;
+      gap: 5px;
+    }
+
+    .major-events-threshold {
+      color: var(--text-dim);
+      font-size: 9px;
     }
     
     .filter-logo {

@@ -289,6 +289,7 @@ def _init_archive_db(path: str) -> None:
         cursor.execute("ALTER TABLE incidents ADD COLUMN geocode_version INTEGER")
     except sqlite3.OperationalError:
         pass
+    _init_peak_units(cursor)
     cursor.execute("UPDATE incidents SET source = 'caddo' WHERE source IS NULL OR TRIM(source) = ''")
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_hash ON incidents(hash)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_first_seen ON incidents(first_seen)')
@@ -341,6 +342,14 @@ def db_connect(*, row_factory: bool = False) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout = 5000;")
     return conn
 
+def _init_peak_units(cursor):
+    """Seed known unit peaks without inventing earlier assignment history."""
+    columns = {row[1] for row in cursor.execute('PRAGMA table_info(incidents)')}
+    if 'peak_units' not in columns:
+        cursor.execute('ALTER TABLE incidents ADD COLUMN peak_units INTEGER')
+        cursor.execute('UPDATE incidents SET peak_units = units')
+
+
 def init_db():
     """Initialize SQLite database with incidents table"""
     conn = db_connect()
@@ -388,6 +397,7 @@ def init_db():
         except sqlite3.OperationalError:
             pass
 
+    _init_peak_units(cursor)
     # Backfill legacy rows that predate multi-source support.
     cursor.execute("UPDATE incidents SET source = 'caddo' WHERE source IS NULL OR TRIM(source) = ''")
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_source ON incidents(source)')
@@ -487,10 +497,11 @@ def archive_old_incidents(*, dry_run: bool = False) -> dict:
                         INSERT INTO incidents
                         (hash, agency, time, units, description, street, cross_streets, municipality, source,
                          latitude, longitude, first_seen, last_seen, is_active,
-                         geocode_source, geocode_quality, geocode_query, geocoded_at, geocode_version)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         geocode_source, geocode_quality, geocode_query, geocoded_at, geocode_version, peak_units)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(hash) DO UPDATE SET
                             agency=excluded.agency, time=excluded.time, units=excluded.units,
+                            peak_units=MAX(COALESCE(incidents.peak_units, 0), COALESCE(incidents.units, 0), COALESCE(excluded.peak_units, 0), COALESCE(excluded.units, 0)),
                             description=excluded.description, street=excluded.street,
                             cross_streets=excluded.cross_streets, municipality=excluded.municipality,
                             source=excluded.source, latitude=excluded.latitude, longitude=excluded.longitude,
@@ -518,6 +529,7 @@ def archive_old_incidents(*, dry_run: bool = False) -> dict:
                         inc.get('geocode_query'),
                         inc.get('geocoded_at'),
                         inc.get('geocode_version'),
+                        inc.get('peak_units', inc.get('units')),
                     ))
                     hashes_to_delete.append((inc.get('hash'), inc.get('last_seen'), inc.get('geocoded_at')))
                     archived_count += 1
@@ -2564,6 +2576,7 @@ def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: b
     conn = db_connect()
     cursor = conn.cursor()
     has_source_column = _ensure_incidents_source_column(conn)
+    has_peak_units = 'peak_units' in {row[1] for row in cursor.execute('PRAGMA table_info(incidents)')}
     now = datetime.now(timezone.utc).isoformat()
     current_hashes = set()
     ordered_incidents = list(incidents)
@@ -2606,6 +2619,11 @@ def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: b
                 existing_cols = "old"
         
         if existing:
+            if has_peak_units:
+                cursor.execute(
+                    'UPDATE incidents SET peak_units = MAX(COALESCE(peak_units, 0), COALESCE(units, 0), COALESCE(?, 0)) WHERE hash = ?',
+                    (incident.get('units'), h),
+                )
             # Unit assignments can change while the incident remains active.
             # Refresh mutable feed fields instead of freezing their first value.
             try:
@@ -2864,6 +2882,12 @@ def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: b
                     ))
             if incident_source not in ('neworleans', 'lakecharles'):
                 log(f"New incident: {incident['description']} at {incident['street'] or incident['cross_streets']}")
+
+        if has_peak_units and not existing:
+            cursor.execute(
+                'UPDATE incidents SET peak_units = MAX(COALESCE(peak_units, 0), COALESCE(units, 0)) WHERE hash = ?',
+                (h,),
+            )
 
     if deactivate_missing:
         # Mark incidents no longer in feed as inactive (source-scoped).
@@ -4077,7 +4101,7 @@ def healthz():
     return jsonify({'ok': True})
 
 PUBLIC_INCIDENT_FIELDS = (
-    'id', 'hash', 'agency', 'time', 'units', 'description', 'street', 'cross_streets',
+    'id', 'hash', 'agency', 'time', 'units', 'peak_units', 'description', 'street', 'cross_streets',
     'municipality', 'source', 'latitude', 'longitude', 'first_seen', 'last_seen',
     'is_active', 'geocode_source', 'geocode_quality',
 )
