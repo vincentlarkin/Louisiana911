@@ -5,19 +5,29 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# Serialize production swaps; never cancel an in-progress deployment.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Connect to Tailscale
-        uses: tailscale/github-action@v2
+        uses: tailscale/github-action@05c58255396c88c609919d571a8b117099c69020 # v2
         with:
           oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
           tags: tag:ci
 
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.0
+        uses: appleboy/ssh-action@55dabf81b49d4120609345970c91507e2d734799 # v1.0.0
         with:
           host: ${{ secrets.SSH_HOST }}
           username: root
@@ -34,6 +44,7 @@ jobs:
             OLD_DIR="${TMP_BASE}/repo_old_${TS}"
             REPO_URL="${{ github.server_url }}/${{ github.repository }}.git"
             REF="main"
+            DEPLOY_SHA="${{ github.sha }}"
             SWAPPED=0
 
             rollback_on_error() {
@@ -53,21 +64,25 @@ jobs:
 
             # Keep a separate git checkout with metadata so live repo can stay clean (no .git).
             if [ -d "$SRC_REPO_DIR/.git" ]; then
-              echo "Updating source checkout in $SRC_REPO_DIR"
+              echo "Updating source checkout"
               # Older deploys may have origin pointed at local LIVE_REPO_DIR.
               if git -C "$SRC_REPO_DIR" remote get-url origin >/dev/null 2>&1; then
                 git -C "$SRC_REPO_DIR" remote set-url origin "$REPO_URL"
               else
                 git -C "$SRC_REPO_DIR" remote add origin "$REPO_URL"
               fi
-              git -C "$SRC_REPO_DIR" fetch --prune origin "$REF"
-              git -C "$SRC_REPO_DIR" reset --hard "origin/$REF"
+              git -C "$SRC_REPO_DIR" fetch --depth 1 origin "$DEPLOY_SHA"
+              git -C "$SRC_REPO_DIR" reset --hard "$DEPLOY_SHA"
               git -C "$SRC_REPO_DIR" clean -fdx
             else
               echo "Bootstrapping source checkout from remote $REPO_URL"
               rm -rf "$SRC_REPO_DIR"
               git clone --depth 1 --branch "$REF" "$REPO_URL" "$SRC_REPO_DIR"
+              git -C "$SRC_REPO_DIR" fetch --depth 1 origin "$DEPLOY_SHA"
+              git -C "$SRC_REPO_DIR" reset --hard "$DEPLOY_SHA"
             fi
+
+            test "$(git -C "$SRC_REPO_DIR" rev-parse HEAD)" = "$DEPLOY_SHA"
 
             echo "Preparing clean release directory (excluding .git/.github)"
             rm -rf "$NEW_DIR" "$OLD_DIR"
@@ -75,6 +90,8 @@ jobs:
             rsync -a --delete \
               --exclude '.git' \
               --exclude '.github' \
+              --exclude '.env' \
+              --exclude '.env.*' \
               "$SRC_REPO_DIR"/ "$NEW_DIR"/
 
             if [ -d "$NEW_DIR/.git" ]; then
