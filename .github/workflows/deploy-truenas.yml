@@ -26,98 +26,32 @@ jobs:
           oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
           tags: tag:ci
 
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@55dabf81b49d4120609345970c91507e2d734799 # v1.0.0
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: root
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            set -euo pipefail
-
-            APP_ROOT="/mnt/Pool3x2/web/Caddo911"
-            LIVE_REPO_DIR="${APP_ROOT}/repo"
-            SRC_REPO_DIR="${APP_ROOT}/.deploy_src_repo"
-            TMP_BASE="${APP_ROOT}/.deploy_tmp"
-            TS="$(date +%Y%m%d_%H%M%S)"
-            NEW_DIR="${TMP_BASE}/repo_live_${TS}"
-            OLD_DIR="${TMP_BASE}/repo_old_${TS}"
-            REPO_URL="${{ github.server_url }}/${{ github.repository }}.git"
-            REF="main"
-            DEPLOY_SHA="${{ github.sha }}"
-            SWAPPED=0
-
-            rollback_on_error() {
-              status="$1"
-              if [ "${SWAPPED}" = "1" ] && [ -d "$OLD_DIR" ]; then
-                echo "Deploy failed after swap; restoring previous repo"
-                rm -rf "$LIVE_REPO_DIR"
-                mv "$OLD_DIR" "$LIVE_REPO_DIR"
-              fi
-              exit "$status"
-            }
-
-            trap 'rollback_on_error $?' ERR
-
-            echo "Starting atomic deploy at $(date -Is)"
-            mkdir -p "$TMP_BASE"
-
-            # Keep a separate git checkout with metadata so live repo can stay clean (no .git).
-            if [ -d "$SRC_REPO_DIR/.git" ]; then
-              echo "Updating source checkout"
-              # Older deploys may have origin pointed at local LIVE_REPO_DIR.
-              if git -C "$SRC_REPO_DIR" remote get-url origin >/dev/null 2>&1; then
-                git -C "$SRC_REPO_DIR" remote set-url origin "$REPO_URL"
-              else
-                git -C "$SRC_REPO_DIR" remote add origin "$REPO_URL"
-              fi
-              git -C "$SRC_REPO_DIR" fetch --depth 1 origin "$DEPLOY_SHA"
-              git -C "$SRC_REPO_DIR" reset --hard "$DEPLOY_SHA"
-              git -C "$SRC_REPO_DIR" clean -fdx
-            else
-              echo "Bootstrapping source checkout from remote $REPO_URL"
-              rm -rf "$SRC_REPO_DIR"
-              git clone --depth 1 --branch "$REF" "$REPO_URL" "$SRC_REPO_DIR"
-              git -C "$SRC_REPO_DIR" fetch --depth 1 origin "$DEPLOY_SHA"
-              git -C "$SRC_REPO_DIR" reset --hard "$DEPLOY_SHA"
-            fi
-
-            test "$(git -C "$SRC_REPO_DIR" rev-parse HEAD)" = "$DEPLOY_SHA"
-
-            echo "Preparing clean release directory (excluding .git/.github)"
-            rm -rf "$NEW_DIR" "$OLD_DIR"
-            mkdir -p "$NEW_DIR"
-            rsync -a --delete \
-              --exclude '.git' \
-              --exclude '.github' \
-              --exclude '.env' \
-              --exclude '.env.*' \
-              "$SRC_REPO_DIR"/ "$NEW_DIR"/
-
-            if [ -d "$NEW_DIR/.git" ]; then
-              echo "Safety check failed: .git exists in new deploy dir"
-              exit 1
-            fi
-            if [ ! -f "$NEW_DIR/Dockerfile" ]; then
-              echo "Safety check failed: Dockerfile missing in new deploy dir"
-              exit 1
-            fi
-
-            if [ -d "$LIVE_REPO_DIR" ]; then
-              mv "$LIVE_REPO_DIR" "$OLD_DIR"
-            fi
-            mv "$NEW_DIR" "$LIVE_REPO_DIR"
-            SWAPPED=1
-
-            echo "Rebuilding and recreating containers"
-            cd "$APP_ROOT"
-            docker compose build --no-cache web collector
-            docker compose up -d --force-recreate
-
-            rm -rf "$OLD_DIR"
-            trap - ERR
-            test ! -d "$LIVE_REPO_DIR/.git" && echo "Verified: no .git in live repo"
-            echo "Deploy complete at $(date -Is)"
+      - name: Deploy through restricted SSH account
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_file="$(mktemp "$RUNNER_TEMP/deploy-key.XXXXXX")"
+          hosts_file="$(mktemp "$RUNNER_TEMP/deploy-hosts.XXXXXX")"
+          trap 'rm -f "$key_file" "$hosts_file"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$key_file"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$hosts_file"
+          ssh -T -i "$key_file" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o HostKeyAlias=truenas-deploy \
+            -o HostKeyAlgorithms=ssh-ed25519 \
+            -o UserKnownHostsFile="$hosts_file" \
+            -o GlobalKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=3 \
+            -l "$DEPLOY_SSH_USER" "$SSH_HOST" "deploy $GITHUB_SHA"
 
       - name: Notify search engines via IndexNow
         continue-on-error: true
