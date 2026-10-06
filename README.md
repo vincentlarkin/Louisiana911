@@ -29,6 +29,8 @@ Current sources include:
 
 New Orleans information is published as a delayed daily record rather than a live feed. Source agencies may update, reclassify, delay, or remove records. Some locations are approximate, generalized, or unavailable.
 
+The Caddo, Baton Rouge, Lafayette, and New Orleans coverage URLs open directly in map view with that source selected, including on mobile. A small dismissible card explains the feed; its expandable details retain the original coverage article. Each URL keeps its own canonical metadata and structured data. Opening a coverage page does not overwrite the visitor's saved map/list preference.
+
 ## Map Guide
 
 - **Red** — higher-severity incidents

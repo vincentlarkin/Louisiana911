@@ -158,6 +158,36 @@ class CanonicalOriginTests(unittest.TestCase):
                 self.assertEqual(301, response.status_code)
                 self.assertEqual(f'{path}/', response.headers['Location'])
 
+    def test_parish_landing_pages_serve_map_with_local_metadata_article_and_history_session(self):
+        pages = {
+            '/caddo911/': ('caddo', 'Caddo Parish'),
+            '/coverage/baton-rouge/': ('batonrouge', 'Baton Rouge'),
+            '/coverage/lafayette/': ('lafayette', 'Lafayette'),
+            '/coverage/new-orleans/': ('neworleans', 'New Orleans'),
+        }
+        for path, (source, place) in pages.items():
+            with self.subTest(path=path):
+                response = self.client.get(path, headers={
+                    'Host': 'localhost', 'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document',
+                })
+                html = response.get_data(as_text=True)
+                self.assertEqual(200, response.status_code)
+                self.assertIn('<div id="map"></div>', html)
+                self.assertIn('<base href="/">', html)
+                self.assertIn(f'id="coverage-intro" data-source="{source}"', html)
+                self.assertEqual(1, html.count('rel="canonical"'))
+                self.assertIn(f'href="https://louisiana911.com{path}"', html)
+                self.assertIn(f'content="https://louisiana911.com{path}"', html)
+                self.assertIn('"@type": "BreadcrumbList"', html)
+                self.assertIn('<details class="coverage-details">', html)
+                self.assertIn(place, html.split('class="coverage-article">', 1)[1])
+                self.assertEqual(1, html.count('<h1'))
+                self.assertIn('l911_history_ui=', response.headers.get('Set-Cookie', ''))
+                self.assertEqual('no-store, private', response.headers['Cache-Control'])
+        home = self.client.get('/').get_data(as_text=True)
+        self.assertNotIn('id="coverage-intro"', home)
+
     def test_versioned_shell_assets_are_immutable(self):
         for path in (
             '/analytics.js?v=4.8.1',
