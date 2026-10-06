@@ -873,6 +873,44 @@ def _serve_index_with_history_ui_session():
     return response
 
 
+def _serve_coverage_map(filename: str, source: str, title: str, summary: str):
+    """Keep each indexable coverage page's metadata and article in the map shell."""
+    with open(os.path.join(app.root_path, 'public', filename), encoding='utf-8') as page:
+        coverage_html = page.read()
+    metadata_pattern = (
+        r'<title>.*?</title>|'
+        r'<meta (?:name="(?:description|robots|twitter:[^"]+)"|property="og:[^"]+")[^>]*>|'
+        r'<link rel="canonical"[^>]*>|'
+        r'<script type="application/ld\+json">.*?</script>'
+    )
+    metadata = '\n  '.join(re.findall(metadata_pattern, coverage_html, re.DOTALL))
+    index_html = re.sub(metadata_pattern, '', _read_map_index_html(), flags=re.DOTALL)
+    index_html = index_html.replace('<head>', '<head>\n  <base href="/">\n  ' + metadata, 1)
+    article = re.search(r'<main id="content">(.*?)</main>', coverage_html, re.DOTALL).group(1)
+    article = article.replace('<h1>', '<h2>').replace('</h1>', '</h2>')
+    panel = f'''
+      <section class="coverage-intro" id="coverage-intro" data-source="{source}" aria-labelledby="coverage-title">
+        <button class="coverage-close" id="coverage-close" type="button" aria-label="Dismiss coverage information">×</button>
+        <p class="coverage-eyebrow">Parish coverage</p>
+        <h1 id="coverage-title">{html_module.escape(title)}</h1>
+        <p class="coverage-summary">{html_module.escape(summary)}</p>
+        <details class="coverage-details">
+          <summary>About this feed &amp; coverage</summary>
+          <div class="coverage-article">{article}</div>
+        </details>
+        <noscript>JavaScript is needed to display the interactive map. Feed details and official source links are available above.</noscript>
+      </section>
+      <button class="coverage-reopen" id="coverage-reopen" type="button" aria-controls="coverage-intro" aria-expanded="true" hidden>About this coverage</button>
+    '''
+    index_html = index_html.replace('<div id="map"></div>', '<div id="map"></div>' + panel, 1)
+    index_html = index_html.replace('<h1>Louisiana 911</h1>', '<span class="brand-title">Louisiana 911</span>', 1)
+    response = app.response_class(index_html, mimetype='text/html')
+    if _is_ui_document_navigation():
+        _set_history_ui_cookie(response)
+    response.headers['Cache-Control'] = 'no-store, private'
+    return response
+
+
 INCIDENT_SHARE_ID_PATTERN = re.compile(r'^[0-9a-f]{32}$')
 
 
@@ -4030,7 +4068,8 @@ def about_redirect():
 
 @app.route('/caddo911/')
 def caddo911_landing():
-    return send_from_directory('public', 'caddo911.html')
+    return _serve_coverage_map('caddo911.html', 'caddo', 'Caddo 911 live calls',
+                               'Shreveport and Caddo Parish calls from the public Caddo 911 feed. Tap a marker for incident details. Independent and unofficial.')
 
 
 @app.route('/caddo911')
@@ -4050,7 +4089,8 @@ def coverage_redirect():
 
 @app.route('/coverage/baton-rouge/')
 def baton_rouge_coverage():
-    return send_from_directory('public', 'coverage-baton-rouge.html')
+    return _serve_coverage_map('coverage-baton-rouge.html', 'batonrouge', 'Baton Rouge traffic incidents',
+                               'Public traffic incidents in Baton Rouge and East Baton Rouge Parish. Tap a marker for details. This feed does not include every 911 call.')
 
 
 @app.route('/coverage/baton-rouge')
@@ -4060,7 +4100,8 @@ def baton_rouge_coverage_redirect():
 
 @app.route('/coverage/lafayette/')
 def lafayette_coverage():
-    return send_from_directory('public', 'coverage-lafayette.html')
+    return _serve_coverage_map('coverage-lafayette.html', 'lafayette', 'Lafayette Parish traffic incidents',
+                               'Current traffic incidents from the public Lafayette 911 feed. Tap a marker for details. This feed does not include every 911 call.')
 
 
 @app.route('/coverage/lafayette')
@@ -4070,7 +4111,8 @@ def lafayette_coverage_redirect():
 
 @app.route('/coverage/new-orleans/')
 def new_orleans_coverage():
-    return send_from_directory('public', 'coverage-new-orleans.html')
+    return _serve_coverage_map('coverage-new-orleans.html', 'neworleans', 'New Orleans calls for service',
+                               'The latest published NOPD calls for Orleans Parish. These are delayed daily records, not live dispatch. Tap a marker for details.')
 
 
 @app.route('/coverage/new-orleans')

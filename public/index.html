@@ -83,7 +83,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.7.0" />
+  <link rel="stylesheet" href="styles.css?v=4.8.2" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -482,8 +482,10 @@
     // Preserve explicit choices from the previous toggle; new visitors get triangles.
     let triangleMarkers = preferences.get('louisiana911TriangleMarkers') !== 'false';
     const storedViewMode = preferences.get('louisiana911ViewMode') || preferences.get('caddo911ViewMode');
+    const coverageIntro = document.getElementById('coverage-intro');
+    const coverageSource = coverageIntro?.dataset.source;
     const firstVisitMobileView = window.matchMedia('(max-width: 720px)').matches ? 'list' : 'map';
-    let viewMode = storedViewMode === 'list' || storedViewMode === 'map'
+    let viewMode = coverageSource ? 'map' : storedViewMode === 'list' || storedViewMode === 'map'
       ? storedViewMode
       : firstVisitMobileView;
 
@@ -788,7 +790,7 @@
     window.addEventListener('load', updateHeaderHeight);
     
     // Add zoom control to bottom right
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
+    L.control.zoom({ position: coverageSource ? 'bottomleft' : 'bottomright' }).addTo(map);
     
     const locationBtn = document.getElementById('location-btn');
     let userLocationMarker = null;
@@ -1007,7 +1009,7 @@
         console.error('Failed to read shared incident data:', error);
       }
     }
-    const sourceFromUrl = new URLSearchParams(window.location.search).get('source');
+    const sourceFromUrl = coverageSource || new URLSearchParams(window.location.search).get('source');
     const supportedSources = new Set(['all', 'caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles']);
     let currentSource = supportedSources.has(sourceFromUrl) ? sourceFromUrl : 'all';
     let currentLafayetteUnit = 'all'; // 'all' | 'police' | 'sheriff' | 'fire'
@@ -3515,6 +3517,7 @@
       }
 
       currentSource = normalized;
+      if (coverageIntro) setCoverageIntroOpen(false, { restoreFocus: false });
       historyPage = 1;
       historyCountsByMonth.clear();
       allHistoryIncidentsForDay = [];
@@ -3776,7 +3779,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.8.1', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.8.2', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
@@ -3784,6 +3787,24 @@
       });
     }
     
+    function setCoverageIntroOpen(open, { restoreFocus = true } = {}) {
+      if (!coverageIntro) return;
+      const reopen = document.getElementById('coverage-reopen');
+      coverageIntro.hidden = !open;
+      reopen.hidden = open;
+      reopen.setAttribute('aria-expanded', String(open));
+      if (restoreFocus) (open ? document.getElementById('coverage-close') : reopen).focus();
+    }
+
+    document.getElementById('coverage-close')?.addEventListener('click', () => setCoverageIntroOpen(false));
+    document.getElementById('coverage-reopen')?.addEventListener('click', () => setCoverageIntroOpen(true));
+    coverageIntro?.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        setCoverageIntroOpen(false);
+      }
+    });
+
     // Initialize History date UI (default to today)
     setHistoryDate(isoToday, { load: false });
     document.querySelectorAll('.source-tab').forEach((button) => {
@@ -3794,7 +3815,8 @@
     syncAgencyFilterGroupsToSource();
     setViewMode(viewMode, { persist: false });
     if (sourceFromUrl && supportedSources.has(sourceFromUrl) && !sharedIncidentView) {
-      focusMapOnSourceSelection(currentSource);
+      const view = SOURCE_MAP_VIEWS[currentSource];
+      map.setView(view.center, view.zoom, { animate: false });
     }
     
     const mapResizeObserver = new ResizeObserver(() => {

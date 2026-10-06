@@ -23,6 +23,46 @@ function deferred() {
 const incident = { id: 1, source: 'caddo', latitude: 32.5, longitude: -93.7,
   description: 'TRAFFIC STOP', street: 'MAIN ST', units: 1, time: '1200' };
 
+test('parish landing pages open the map despite saved list or mobile defaults and select the route source', () => {
+  const start = html.indexOf('    const storedViewMode =');
+  const end = html.indexOf('    // Initialize map', start);
+  const sourceStart = html.indexOf('    const sourceFromUrl =');
+  const sourceEnd = html.indexOf('    let currentLafayetteUnit', sourceStart);
+  for (const source of ['caddo', 'batonrouge', 'lafayette', 'neworleans', null]) {
+    for (const mobile of [true, false]) {
+      for (const saved of ['list', 'map', null]) {
+        const ctx = vm.createContext({
+          preferences: { get: () => saved }, URLSearchParams,
+          document: { getElementById: () => source ? { dataset: { source } } : null },
+          window: { matchMedia: () => ({ matches: mobile }), location: { search: '?source=lakecharles' } },
+        });
+        vm.runInContext(html.slice(start, end) + html.slice(sourceStart, sourceEnd), ctx);
+        assert.equal(vm.runInContext('viewMode', ctx), source ? 'map' : saved || (mobile ? 'list' : 'map'));
+        assert.equal(vm.runInContext('currentSource', ctx), source || 'lakecharles');
+      }
+    }
+  }
+});
+
+test('coverage card dismisses and reopens with keyboard focus and accessible state', () => {
+  const intro = {};
+  const reopen = { focus() { this.focused = true; }, setAttribute(name, value) { this[name] = value; } };
+  const close = { focus() { this.focused = true; } };
+  const ctx = loadFunctions(['setCoverageIntroOpen'], {
+    coverageIntro: intro, document: { getElementById: id => id === 'coverage-reopen' ? reopen : close },
+  });
+  ctx.setCoverageIntroOpen(false);
+  assert.equal(intro.hidden, true);
+  assert.equal(reopen.hidden, false);
+  assert.equal(reopen['aria-expanded'], 'false');
+  assert.equal(reopen.focused, true);
+  ctx.setCoverageIntroOpen(true);
+  assert.equal(intro.hidden, false);
+  assert.equal(reopen.hidden, true);
+  assert.equal(reopen['aria-expanded'], 'true');
+  assert.equal(close.focused, true);
+});
+
 test('sharing reports successful native/copy outcomes without counting cancellation or failure', async () => {
   for (const outcome of ['native', 'cancel', 'copy', 'failed']) {
     const events = [];
@@ -408,6 +448,7 @@ test('new visitors get triangles and saved shape/view choices survive initializa
       localStorage: { getItem: key => { if (blocked) throw new Error('blocked'); return values[key] ?? null; },
         setItem: (key, value) => { if (blocked) throw new Error('blocked'); values[key] = value; } },
       window: { matchMedia: () => ({ matches: mobile }) },
+      document: { getElementById: () => null },
     });
     vm.runInContext(html.slice(start, end), context);
     return { context, state: vm.runInContext('({triangleMarkers, viewMode})', context) };
