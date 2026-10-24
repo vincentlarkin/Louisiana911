@@ -37,11 +37,9 @@ services:
     networks:
       internal: {}
       nginx_net:
-        # nginx proxies to caddo911_web; keep the old names until it is updated.
+        # nginx-config/conf.d/louisiana911.conf proxies to this name.
         aliases:
           - la911-web
-          - caddo911_web
-          - caddo911-web
 
   collector:
     <<: *app
