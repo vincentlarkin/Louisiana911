@@ -2332,8 +2332,13 @@ def geocode_address(street, cross_streets, municipality, source: str = 'caddo'):
     log(f"  [--] unresolved | {street_clean or '?'} @ {cross1 or '?'} {'& ' + cross2 if cross2 else ''}")
     return unresolved
 
-def hash_incident(incident):
-    """Generate unique hash for incident deduplication"""
+def hash_incident(incident, *, reported_at: str | None = None):
+    """Generate unique hash for incident deduplication.
+
+    Feeds without a source ID only publish a clock time, so the same call type
+    at the same place and minute on another day produces the same base key.
+    Pass ``reported_at`` to derive a distinct hash for that later occurrence.
+    """
     source = _normalize_source_name(incident.get('source') if isinstance(incident, dict) else None)
     source_id = _clean_ws(incident.get('source_id') if isinstance(incident, dict) else '')
     if source_id:
@@ -2343,7 +2348,55 @@ def hash_incident(incident):
             f"{source}-{incident['agency']}-{incident['time']}-"
             f"{incident['description']}-{incident['street']}-{incident['cross_streets']}"
         )
+        if reported_at:
+            key = f"{key}-{reported_at}"
     return hashlib.md5(key.encode()).hexdigest()
+
+
+def _resolve_incident_hash(cursor, incident: dict, observed_at: str) -> str:
+    """Return the stored hash for this occurrence of a feed incident.
+
+    A row with the undated base hash is reused while it is still active or when
+    both describe the same reported time. A closed row from another day is a
+    different call that happens to share the clock time, so it gets a dated hash
+    instead of being reopened and merged into the old record.
+    """
+    base_hash = hash_incident(incident)
+    if _clean_ws(incident.get('source_id') or ''):
+        return base_hash
+    try:
+        existing = cursor.execute(
+            'SELECT is_active, first_seen, time FROM incidents WHERE hash = ?',
+            (base_hash,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return base_hash
+    if existing is None or existing[0]:
+        return base_hash
+    source = incident.get('source')
+    # A dated occurrence that is still on the feed keeps its hash past midnight.
+    try:
+        continuing = cursor.execute(
+            '''SELECT hash FROM incidents
+               WHERE is_active = 1 AND hash != ? AND source IS ? AND agency IS ? AND time IS ?
+                 AND description IS ? AND street IS ? AND cross_streets IS ?
+               ORDER BY first_seen DESC LIMIT 1''',
+            (base_hash, source, incident.get('agency'), incident.get('time'), incident.get('description'),
+             incident.get('street'), incident.get('cross_streets')),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        continuing = None
+    if continuing:
+        return continuing[0]
+    reported_at = _incident_reported_at(
+        {'source': source, 'time': incident.get('time'), 'first_seen': observed_at}
+    )
+    existing_reported_at = _incident_reported_at(
+        {'source': source, 'time': existing[2], 'first_seen': existing[1]}
+    )
+    if not reported_at or not existing_reported_at or reported_at == existing_reported_at:
+        return base_hash
+    return hash_incident(incident, reported_at=reported_at)
 
 def scrape_caddo_incidents():
     """
@@ -2612,6 +2665,15 @@ def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: b
 
     source_default = _normalize_source_name(source)
     conn = db_connect()
+    try:
+        _store_incidents(conn, incidents, source_default, deactivate_missing)
+    finally:
+        conn.close()
+    last_update = datetime.now(timezone.utc).isoformat()
+    meta_set('last_update', last_update)
+
+
+def _store_incidents(conn, incidents, source_default: str, deactivate_missing: bool) -> None:
     cursor = conn.cursor()
     has_source_column = _ensure_incidents_source_column(conn)
     has_peak_units = 'peak_units' in {row[1] for row in cursor.execute('PRAGMA table_info(incidents)')}
@@ -2628,12 +2690,12 @@ def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: b
             conn.commit()
         incident_source = _normalize_source_name(incident.get('source') if isinstance(incident, dict) else source_default)
         incident['source'] = incident_source
-        h = hash_incident(incident)
-        current_hashes.add(h)
         desired_active = 1 if incident.get('is_active', True) else 0
         occurred_at = incident.get('occurred_at')
         if not isinstance(occurred_at, str) or not _parse_iso_datetime(occurred_at):
             occurred_at = None
+        h = _resolve_incident_hash(cursor, incident, occurred_at or now)
+        current_hashes.add(h)
 
         # Check if exists
         try:
@@ -2947,9 +3009,6 @@ def process_incidents(incidents, *, source: str = 'caddo', deactivate_missing: b
                 cursor.execute('UPDATE incidents SET is_active = 0 WHERE hash = ?', (h,))
 
     conn.commit()
-    conn.close()
-    last_update = datetime.now(timezone.utc).isoformat()
-    meta_set('last_update', last_update)
 
 
 def _store_feed_refresh(source: str, refreshed_at_text: str | None) -> None:
