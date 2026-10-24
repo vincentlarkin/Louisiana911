@@ -91,6 +91,43 @@ class CaddoTests(unittest.TestCase):
             finally:
                 conn.close()
 
+    def test_same_clock_time_on_another_day_is_a_new_incident(self):
+        call = dict(source='caddo', agency='SFD', time='1833', units=1, description='MEDICAL EMERGENCY',
+                    street='BAIRD', cross_streets='', municipality='SHV')
+        geo = dict(lat=32.5, lng=-93.7, source='arcgis', quality='street', query='test')
+
+        def snapshot(when, incidents):
+            with patch.object(app, 'datetime', wraps=datetime) as clock:
+                clock.now.return_value = when
+                app.process_incidents(incidents, allow_empty=True)
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(app, 'DB_PATH', os.path.join(directory, 'live.db')), \
+                patch.object(app, '_incident_geocode_result', return_value=geo):
+            app.init_db()
+            snapshot(datetime(2026, 10, 7, 23, 34, tzinfo=timezone.utc), [dict(call)])
+            snapshot(datetime(2026, 10, 7, 23, 50, tzinfo=timezone.utc), [])
+            # Dropping off and returning on the same day is the same call.
+            snapshot(datetime(2026, 10, 7, 23, 55, tzinfo=timezone.utc), [dict(call)])
+            snapshot(datetime(2026, 10, 8, 0, 10, tzinfo=timezone.utc), [])
+            # Same minute two days later is a different call.
+            snapshot(datetime(2026, 10, 9, 23, 40, tzinfo=timezone.utc), [dict(call)])
+            # Still on the feed after midnight and the next day: same call.
+            snapshot(datetime(2026, 10, 10, 5, 0, tzinfo=timezone.utc), [dict(call)])
+            snapshot(datetime(2026, 10, 10, 23, 45, tzinfo=timezone.utc), [dict(call)])
+            conn = app.db_connect(row_factory=True)
+            try:
+                rows = [dict(r) for r in conn.execute('SELECT * FROM incidents ORDER BY first_seen')]
+            finally:
+                conn.close()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]['hash'], app.hash_incident(call))
+        self.assertEqual((rows[0]['is_active'], rows[1]['is_active']), (0, 1))
+        self.assertTrue(rows[0]['first_seen'].startswith('2026-10-07T23:34'))
+        self.assertTrue(rows[0]['last_seen'].startswith('2026-10-07T23:55'))
+        self.assertTrue(rows[1]['first_seen'].startswith('2026-10-09T23:40'))
+        self.assertEqual(app._public_incident(rows[1])['reported_at'], '2026-10-09T23:33:00+00:00')
+
     def test_background_collector_passes_only_validated_caddo_empty_snapshots(self):
         with patch.object(app, 'meta_set'), patch.object(app, '_store_feed_refresh'), \
              patch.dict(app.source_last_scrape_monotonic, {}, clear=True), \
