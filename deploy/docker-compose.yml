@@ -1,0 +1,65 @@
+# Production stack on the server. The deploy script runs this with
+#   --project-directory /srv/app
+# so relative paths resolve there: ./repo is the release, ./data the SQLite
+# files and ./.louisiana911.env the secrets (never committed).
+name: la911
+
+x-app: &app
+  image: la911:latest
+  build: ./repo
+  # "always" (not "unless-stopped") so containers come back after the Docker
+  # daemon itself restarts, which it treats as the containers being stopped.
+  restart: always
+  environment:
+    TZ: America/Chicago
+    LOUISIANA911_DB_PATH: /data/caddo911.db
+    LOUISIANA911_BACKUP_DIR: /data/backups
+  volumes:
+    - ./data:/data
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  web:
+    <<: *app
+    container_name: la911_web
+    command: ["gunicorn", "-w", "1", "-b", "0.0.0.0:3911", "app:app"]
+    env_file:
+      - ./.louisiana911.env
+    expose:
+      - "3911"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3911/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    networks:
+      internal: {}
+      nginx_net:
+        # nginx proxies to caddo911_web; keep the old names until it is updated.
+        aliases:
+          - la911-web
+          - caddo911_web
+          - caddo911-web
+
+  collector:
+    <<: *app
+    container_name: la911_collector
+    command: ["python", "app.py", "--mode", "gather", "--interval", "60", "--quiet"]
+    healthcheck:
+      # Unhealthy when no scrape has finished in the last 5 minutes.
+      test: ["CMD", "python", "-c", "import sqlite3, datetime as d; v = sqlite3.connect('file:/data/caddo911.db?mode=ro', uri=True).execute(\"SELECT value FROM meta WHERE key = 'last_scrape_finished_at'\").fetchone(); assert d.datetime.now(d.timezone.utc) - d.datetime.fromisoformat(v[0]) < d.timedelta(minutes=5)"]
+      interval: 60s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+  nginx_net:
+    external: true
+    name: proxy_default
