@@ -40,7 +40,36 @@ SHA is the tip of `main`, then `louisiana.sh`:
    A Docker daemon crash stops all containers on the host, and they are not
    restarted automatically.
 
-## Changing the stack or the deploy script
+## Off-site backups
+
+The collector archives incidents older than 30 days into monthly files every
+night at 3:00 AM Central. Copies leave the NAS every night:
+
+| Time (Central) | What |
+| --- | --- |
+| 3:30 AM | TrueNAS cron job runs `offsite-backup.sh` as root |
+| 4:00 AM | Cloud Sync task "Louisiana911 databases to OneDrive" (push, copy) |
+
+`offsite-backup.sh` snapshots each database with the SQLite backup API,
+refuses any copy that fails `PRAGMA integrity_check`, and stages gzip files in
+`/mnt/Pool3x2/web/Caddo911/offsite/`:
+
+```
+daily/caddo911_YYYY-MM-DD.db.gz      live database, last 14 kept on the NAS
+archives/caddo911_archive_YYYY_MM.db.gz
+                                     replaced when the month's content changes
+SHA256SUMS, LAST_BACKUP.txt
+```
+
+The Cloud Sync task copies that folder to `OneDrive:/Backups/Louisiana911`.
+Copy mode never deletes remote files, so every daily snapshot stays in OneDrive
+even after it is pruned locally (about 10 MB per day).
+
+To restore, download the files and `gunzip` them into the `data/` directory
+with the containers stopped; strip the `_YYYY-MM-DD` suffix from the daily file
+to get `caddo911.db`.
+
+## Changing the stack or the scripts
 
 The repository is the master copy, but a push cannot change what runs as root.
 After reviewing and merging a change to either file, install it on the NAS as
@@ -51,6 +80,7 @@ src=/mnt/Pool3x2/web/Caddo911/.deploy_src_repo
 git -C "$src" fetch --depth 1 origin main && git -C "$src" reset --hard origin/main
 install -m 644 "$src/deploy/docker-compose.yml" /mnt/Pool3x2/web/Caddo911/docker-compose.yml
 install -m 700 "$src/deploy/louisiana.sh" /mnt/Pool3x2/deployment-control/private/louisiana.sh
+install -m 700 "$src/deploy/offsite-backup.sh" /mnt/Pool3x2/deployment-control/private/offsite-backup.sh
 ```
 
 Then re-run the workflow from the Actions tab (or push again).
