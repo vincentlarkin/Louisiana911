@@ -33,7 +33,6 @@ from sources import lafayette as lafayette_source
 from sources import batonrouge as batonrouge_source
 from sources import neworleans as neworleans_source
 from sources import lakecharles as lakecharles_source
-from sources import neworleans_archive as neworleans_archive_source
 
 app = Flask(__name__, static_folder='public', static_url_path='')
 
@@ -117,28 +116,6 @@ def _list_archive_dbs() -> list[str]:
     ])
 
 
-def _get_neworleans_raw_db_path(year: int) -> str:
-    """Dedicated append-only raw mirror path for an annual NOLA dataset."""
-    configured = _env_setting(
-        'LOUISIANA911_NOLA_RAW_DB_PATH',
-        'CADDO911_NOLA_RAW_DB_PATH',
-    ).strip()
-    if configured:
-        expanded = os.path.expanduser(configured)
-        return expanded.format(year=year) if '{year}' in expanded else expanded
-    return os.path.join(_get_archive_dir(), f'neworleans_calls_{year:04d}.db')
-
-
-def _list_neworleans_raw_dbs() -> list[str]:
-    archive_dir = _get_archive_dir()
-    if not os.path.isdir(archive_dir):
-        return []
-    return sorted(
-        os.path.join(archive_dir, name)
-        for name in os.listdir(archive_dir)
-        if re.fullmatch(r'neworleans_calls_\d{4}\.db', name)
-    )
-
 def _get_backup_dir() -> str:
     """Directory where periodic backup snapshots are written."""
     configured = _env_setting('LOUISIANA911_BACKUP_DIR', 'CADDO911_BACKUP_DIR').strip()
@@ -217,7 +194,7 @@ def create_backup_snapshot(*, include_archives: bool = True) -> dict:
     """
     Create timestamped SQLite backups.
     - Always includes the main DB.
-    - Optionally includes monthly archives and annual raw NOLA mirrors.
+    - Optionally includes the monthly archives.
     """
     backup_dir = _get_backup_dir()
     os.makedirs(backup_dir, exist_ok=True)
@@ -225,7 +202,6 @@ def create_backup_snapshot(*, include_archives: bool = True) -> dict:
     targets = [DB_PATH]
     if include_archives:
         targets.extend(_list_archive_dbs())
-        targets.extend(_list_neworleans_raw_dbs())
     created: list[str] = []
     skipped: list[str] = []
     for src in targets:
@@ -5017,134 +4993,6 @@ def run_gather_mode(
             pass
         log("[LOUISIANA 911] Collector stopped.")
 
-def run_regeocode(*, dry_run: bool = False, limit: int | None = None) -> None:
-    """
-    Re-geocode all incidents in the database using the improved geocoding logic.
-    Useful for fixing historical bad geocodes (e.g., Bossier Parish false positives).
-    """
-    init_db()
-    conn = db_connect(row_factory=True)
-    cursor = conn.cursor()
-    
-    # Get all incidents (or limit if specified)
-    if limit:
-        cursor.execute('SELECT * FROM incidents ORDER BY first_seen DESC LIMIT ?', (limit,))
-    else:
-        cursor.execute('SELECT * FROM incidents ORDER BY first_seen DESC')
-    
-    rows = cursor.fetchall()
-    total = len(rows)
-    log(f"[REGEOCODE] Found {total} incidents to process{' (dry run)' if dry_run else ''}")
-    
-    updated = 0
-    skipped = 0
-    failed = 0
-    
-    # Clear the geocode cache to force fresh lookups
-    geocode_cache.clear()
-    geocode_intersection_cache.clear()
-    
-    for i, row in enumerate(rows, 1):
-        # Convert Row to dict for easier access (handles missing columns gracefully)
-        row_dict = dict(row)
-        incident_id = row_dict['id']
-        street = row_dict.get('street')
-        cross_streets = row_dict.get('cross_streets')
-        municipality = row_dict.get('municipality')
-        old_lat = row_dict.get('latitude')
-        old_lng = row_dict.get('longitude')
-        old_source = row_dict.get('geocode_source')
-        old_quality = row_dict.get('geocode_quality')
-        old_version = row_dict.get('geocode_version')
-        desc = row_dict.get('description') or 'Unknown'
-        
-        # Skip if no address info at all
-        if not street and not cross_streets:
-            skipped += 1
-            continue
-        
-        try:
-            # Get new geocode. New Orleans needs the same public block-mask,
-            # intersection, and Approx Loc handling used during normal imports.
-            row_source = _normalize_source_name(row_dict.get('source') or 'caddo')
-            if row_source == 'lakecharles':
-                # The importer alone maintains published Lake Charles points;
-                # a maintenance geocode pass must not resolve withheld points.
-                skipped += 1
-                continue
-            if row_source == 'neworleans':
-                nola_probe = dict(row_dict)
-                nola_probe['latitude'] = None
-                nola_probe['longitude'] = None
-                geo = _incident_geocode_result(nola_probe, row_source)
-            else:
-                geo = geocode_address(
-                    street,
-                    cross_streets,
-                    municipality,
-                    source=row_source,
-                )
-            new_lat = geo.get('lat')
-            new_lng = geo.get('lng')
-            new_source = geo.get('source')
-            new_quality = geo.get('quality')
-            
-            # Check coordinate presence/distance plus metadata algorithm version.
-            old_has_coords = old_lat is not None and old_lng is not None
-            new_has_coords = new_lat is not None and new_lng is not None
-            provider_confirmed = new_has_coords or bool(geo.get('provider_responded'))
-            coordinates_changed = provider_confirmed and old_has_coords != new_has_coords
-            if old_has_coords and new_has_coords:
-                dist = _haversine_m(float(old_lat), float(old_lng), float(new_lat), float(new_lng))
-                coordinates_changed = dist > 50
-            changed = provider_confirmed and (
-                coordinates_changed or any((
-                    old_source != new_source,
-                    old_quality != new_quality,
-                    old_version != GEOCODER_VERSION,
-                ))
-            )
-            
-            # Log progress
-            status = "CHANGED" if changed else "same"
-            if changed and not dry_run:
-                now = datetime.now(timezone.utc).isoformat()
-                try:
-                    cursor.execute('''
-                        UPDATE incidents 
-                        SET latitude = ?, longitude = ?, geocode_source = ?, geocode_quality = ?, 
-                            geocode_query = ?, geocoded_at = ?, geocode_version = ?
-                        WHERE id = ?
-                    ''', (new_lat, new_lng, new_source, new_quality, geo.get('query'), now, GEOCODER_VERSION, incident_id))
-                    updated += 1
-                except sqlite3.OperationalError:
-                    # Older schema
-                    cursor.execute('UPDATE incidents SET latitude = ?, longitude = ? WHERE id = ?',
-                                   (new_lat, new_lng, incident_id))
-                    updated += 1
-            elif changed:
-                updated += 1  # Count as "would update" in dry run
-            
-            # Progress every 25 incidents
-            if i % 25 == 0 or i == total:
-                log(f"[REGEOCODE] Progress: {i}/{total} ({updated} updated, {skipped} skipped)")
-                
-        except Exception as e:
-            failed += 1
-            log(f"[REGEOCODE] Error on incident {incident_id}: {e}")
-        
-        # Small delay to avoid hammering geocoding APIs
-        time.sleep(0.05)
-    
-    if not dry_run:
-        conn.commit()
-    conn.close()
-    
-    log(f"[REGEOCODE] Complete! Updated: {updated}, Skipped: {skipped}, Failed: {failed}")
-    if dry_run:
-        log(f"[REGEOCODE] (Dry run - no changes were saved)")
-
-
 def run_archive(*, dry_run: bool = False) -> None:
     """Run the archive process to move old incidents to monthly archive DBs."""
     init_db()
@@ -5171,91 +5019,6 @@ def run_backup(*, include_archives: bool = True) -> None:
         log(f"[BACKUP] Pruned {len(removed)} old backup file(s)")
 
 
-def run_new_orleans_month_backfill(month: str) -> None:
-    """Import a NOLA calendar month without deleting or replacing prior rows."""
-    init_db()
-    log(f"[NOLA] Fetching official citizen-initiated calls for {month}...")
-    incidents, coverage_label = neworleans_source.scrape_month(
-        month,
-        user_agent=SCRAPER_USER_AGENT,
-        timeout_seconds=60,
-    )
-    if not incidents:
-        log(f"[NOLA] No published rows found for {month}.")
-        return
-
-    # Backfills are additive: rows outside the requested month must never be
-    # deactivated or removed. A normal two-day refresh below restores the
-    # exact current Latest slice after the historical import.
-    process_incidents(incidents, source='neworleans', deactivate_missing=False)
-    latest_incidents, refreshed_at_text = scrape_neworleans_incidents()
-    if latest_incidents:
-        process_incidents(latest_incidents, source='neworleans')
-        _store_feed_refresh('neworleans', refreshed_at_text)
-
-    active_count = sum(1 for incident in incidents if incident.get('is_active', True))
-    log(
-        f"[NOLA] Imported {len(incidents)} preserved rows for {month} "
-        f"({active_count} in the current Latest slice). {coverage_label or ''}".strip()
-    )
-
-
-def run_new_orleans_year_mirror(year: int) -> dict:
-    """Preserve every official NOLA source row and every observed revision."""
-    db_path = _get_neworleans_raw_db_path(year)
-    log(f"[NOLA RAW] Mirroring all official {year} rows to {db_path}...")
-    result = neworleans_archive_source.mirror_year(
-        year,
-        db_path=db_path,
-        user_agent=SCRAPER_USER_AGENT,
-        timeout_seconds=120,
-        progress=log,
-    )
-    log(
-        f"[NOLA RAW] {result['status']}: {result['current_calls']:,} current calls, "
-        f"{result['call_versions']:,} preserved versions, "
-        f"quick_check={result['quick_check']}"
-    )
-    if result['status'] != 'complete' or result['quick_check'] != 'ok':
-        raise RuntimeError(
-            f"NOLA raw mirror verification failed: status={result['status']} "
-            f"quick_check={result['quick_check']}"
-        )
-    return result
-
-
-def run_new_orleans_year_backfill(year: int) -> None:
-    """Add every retained NOLA call for a year to statewide History."""
-    init_db()
-    log(f"[NOLA] Fetching all retained citizen-initiated calls for {year}...")
-    incidents, coverage_label = neworleans_source.scrape_year(
-        year,
-        user_agent=SCRAPER_USER_AGENT,
-        timeout_seconds=120,
-    )
-    if not incidents:
-        log(f"[NOLA] No published retained rows found for {year}.")
-        return
-
-    process_incidents(incidents, source='neworleans', deactivate_missing=False)
-    latest_incidents, refreshed_at_text = scrape_neworleans_incidents()
-    if latest_incidents:
-        process_incidents(latest_incidents, source='neworleans')
-        _store_feed_refresh('neworleans', refreshed_at_text)
-
-    active_count = sum(1 for incident in incidents if incident.get('is_active', True))
-    log(
-        f"[NOLA] Imported {len(incidents):,} preserved display rows for {year} "
-        f"({active_count} in the current Latest slice). {coverage_label or ''}".strip()
-    )
-
-
-def run_new_orleans_year_prepare(year: int) -> None:
-    """Build the raw annual mirror first, then the curated statewide history."""
-    run_new_orleans_year_mirror(year)
-    run_new_orleans_year_backfill(year)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Louisiana 911 public incident monitor")
     parser.add_argument("--mode", choices=["serve", "gather", "interactive"], default="serve",
@@ -5264,38 +5027,12 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=3911)
     parser.add_argument("--interval", type=int, default=60, help="scrape interval in seconds")
     parser.add_argument("--quiet", action="store_true", help="reduce console output (recommended for gather mode)")
-    parser.add_argument("--regeocode", action="store_true", help="re-geocode all incidents in database using improved logic, then exit")
-    parser.add_argument("--regeocode-dry-run", action="store_true", help="like --regeocode but don't save changes (preview only)")
-    parser.add_argument("--regeocode-limit", type=int, default=None, help="limit re-geocoding to N most recent incidents")
     parser.add_argument("--archive", action="store_true", help=f"archive incidents older than {ARCHIVE_AFTER_DAYS} days to monthly DBs, then exit")
     parser.add_argument("--archive-dry-run", action="store_true", help="like --archive but don't move anything (preview only)")
     parser.add_argument("--no-auto-archive", action="store_true", help="disable daily automatic archiving (3 AM Central)")
     parser.add_argument("--backup", action="store_true", help="create a one-time SQLite backup snapshot, then exit")
     parser.add_argument("--backup-main-only", action="store_true", help="when used with --backup, only back up the main DB (skip archive DBs)")
     parser.add_argument("--no-auto-backup", action="store_true", help="disable weekly automatic backup snapshots (Sunday 11:30 PM Central)")
-    parser.add_argument(
-        "--backfill-neworleans-month",
-        metavar="YYYY-MM",
-        help="additively import one full official New Orleans calendar month, then exit",
-    )
-    parser.add_argument(
-        "--mirror-neworleans-year",
-        type=int,
-        metavar="YYYY",
-        help="append every official NOLA source row/version for a year to its raw mirror DB, then exit",
-    )
-    parser.add_argument(
-        "--backfill-neworleans-year",
-        type=int,
-        metavar="YYYY",
-        help="additively import every retained NOLA call for a year into statewide History, then exit",
-    )
-    parser.add_argument(
-        "--prepare-neworleans-year",
-        type=int,
-        metavar="YYYY",
-        help="mirror all raw NOLA rows, then add every retained call to statewide History",
-    )
     args = parser.parse_args()
 
     global QUIET
@@ -5306,30 +5043,9 @@ def main() -> None:
         run_archive(dry_run=args.archive_dry_run)
         return
 
-    # Handle re-geocode modes (one-time, then exit)
-    if args.regeocode or args.regeocode_dry_run:
-        run_regeocode(dry_run=args.regeocode_dry_run, limit=args.regeocode_limit)
-        return
-
     # Handle one-time backup mode
     if args.backup:
         run_backup(include_archives=not args.backup_main_only)
-        return
-
-    if args.backfill_neworleans_month:
-        run_new_orleans_month_backfill(args.backfill_neworleans_month)
-        return
-
-    if args.mirror_neworleans_year:
-        run_new_orleans_year_mirror(args.mirror_neworleans_year)
-        return
-
-    if args.backfill_neworleans_year:
-        run_new_orleans_year_backfill(args.backfill_neworleans_year)
-        return
-
-    if args.prepare_neworleans_year:
-        run_new_orleans_year_prepare(args.prepare_neworleans_year)
         return
 
     # Store archive preference for start_collector
