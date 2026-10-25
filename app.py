@@ -3383,6 +3383,7 @@ def _build_nearby_report(lat: float, lon: float, radius_miles: float, days: int)
     source_counts: dict[str, int] = {}
     month_counts: dict[str, int] = {}
     types: dict[str, dict] = {}
+    blocks: dict[str, dict] = {}
     approximate = 0
     for incident in matches:
         severity_counts[incident['severity']] += 1
@@ -3395,6 +3396,16 @@ def _build_nearby_report(lat: float, lon: float, radius_miles: float, days: int)
         description = _clean_ws(incident['description'] or '') or 'Unlisted'
         entry = types.setdefault(description, {'description': description, 'count': 0, 'severity': incident['severity']})
         entry['count'] += 1
+        # The published street + cross streets (or block address) is the closest thing to a block.
+        label = _incident_location_label(incident)
+        if label:
+            block = blocks.setdefault(label.upper(), {
+                'label': label, 'count': 0, 'severity': dict.fromkeys(SEVERITY_ORDER, 0), '_lat': 0.0, '_lon': 0.0,
+            })
+            block['count'] += 1
+            block['severity'][incident['severity']] += 1
+            block['_lat'] += incident['latitude']
+            block['_lon'] += incident['longitude']
 
     def list_item(incident: dict) -> dict:
         return {
@@ -3423,6 +3434,13 @@ def _build_nearby_report(lat: float, lon: float, radius_miles: float, days: int)
         ],
         'months': [{'month': key, 'count': month_counts[key]} for key in sorted(month_counts)],
         'types': sorted(types.values(), key=lambda item: (-item['count'], item['description']))[:25],
+        'blocks': [
+            {
+                'label': block['label'], 'count': block['count'], 'severity': block['severity'],
+                'lat': round(block['_lat'] / block['count'], 5), 'lon': round(block['_lon'] / block['count'], 5),
+            }
+            for block in sorted(blocks.values(), key=lambda item: (-item['count'], item['label']))[:300]
+        ],
         # Compact map points: [lat, lon, severity index]
         'points': [
             [round(item['latitude'], 5), round(item['longitude'], 5), SEVERITY_ORDER.index(item['severity'])]

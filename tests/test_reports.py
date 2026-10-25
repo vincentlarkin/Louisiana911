@@ -99,6 +99,9 @@ class ReportApiTests(unittest.TestCase):
 
             status, body = self.get('/api/reports/nearby?lat=32.5&lon=-93.75&radius=2&days=0')
             self.assertEqual(4, body['total'])
+            self.assertEqual('MAIN ST', body['blocks'][0]['label'])
+            self.assertEqual(4, body['blocks'][0]['count'])
+            self.assertEqual(3, body['blocks'][0]['severity']['high'])  # shots fired + two thefts
 
     def test_nearby_rejects_unsupported_input(self):
         for query in (

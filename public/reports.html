@@ -21,6 +21,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script type="application/json" id="map-config">{}</script>
   <style>
@@ -178,6 +179,11 @@
     .recent .meta { display: block; color: var(--dim); font-size: 13px; }
     .recent .dist { color: var(--dim); font-size: 13px; white-space: nowrap; }
     .note { color: var(--dim); font-size: 13px; }
+    .blocks { margin: 14px 0; }
+    .blocks h2 { margin: 0 0 2px; font-size: 16px; }
+    .blocks button { all: unset; flex: 1; min-width: 0; overflow-wrap: anywhere; cursor: pointer; }
+    .blocks button:hover, .blocks button:focus-visible { color: var(--link); }
+    .blocks .rank { color: var(--dim); width: 1.2em; }
 
     footer { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--dim); font-size: 13px; }
 
@@ -202,7 +208,7 @@
 
     <div class="tabs" role="tablist" aria-label="Report type">
       <button class="tab" role="tab" id="tab-parish" aria-controls="parish-view" aria-selected="true" data-view="parish" type="button">By parish</button>
-      <button class="tab" role="tab" id="tab-nearby" aria-controls="nearby-view" aria-selected="false" data-view="nearby" type="button">Near a place</button>
+      <button class="tab" role="tab" id="tab-nearby" aria-controls="nearby-view" aria-selected="false" data-view="nearby" type="button">By address</button>
     </div>
 
     <section id="parish-view" role="tabpanel" aria-labelledby="tab-parish">
@@ -227,6 +233,10 @@
           <div class="map-wrap">
             <div id="map" role="application" aria-label="Map. Tap to choose the center of the search circle."></div>
             <p class="map-hint"><span id="map-count"></span>Tap the map to move the circle, or <button class="btn" id="locate" type="button">use my location</button></p>
+          </div>
+          <div class="blocks" id="blocks" hidden>
+            <h2>Busiest blocks</h2>
+            <ol class="types" id="blocks-list"></ol>
           </div>
           <div class="option-group">
             <span id="radius-label">Distance</span>
@@ -262,6 +272,8 @@
   </main>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.3/leaflet-maplibre-gl.js"></script>
   <script>
     const SEVERITIES = [
       ['high', 'High'], ['medical', 'Medical'], ['medium', 'Medium'],
@@ -391,7 +403,7 @@
     }
     monthSelect.addEventListener('change', () => loadParishes(monthSelect.value));
 
-    // ---- Near a place ---------------------------------------------------
+    // ---- By address -----------------------------------------------------
     const params = new URLSearchParams(location.search);
     const state = {
       lat: Number(params.get('lat')) || null,
@@ -415,11 +427,9 @@
       nearbyStarted = true;
       const cartoKey = String(JSON.parse(document.getElementById('map-config').textContent || '{}').cartoKey || '').trim();
       map = L.map('map', { zoomControl: true }).setView([32.5, -93.75], 11);
+      map.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>');
       if (cartoKey) {
-        L.tileLayer(`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(cartoKey)}`, {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-          maxZoom: 19,
-        }).addTo(map);
+        addCartoBasemap(cartoKey);
       } else {
         document.body.classList.add('osm-dark');
         L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -431,6 +441,67 @@
       map.on('click', event => setCenter(event.latlng.lat, event.latlng.lng, ''));
       syncChips();
       if (state.lat && state.lon) setCenter(state.lat, state.lon, state.label, { fit: true });
+    }
+
+    // Same CARTO Dark Matter basemap as the main map, with its brighter street labels.
+    function addCartoBasemap(key) {
+      const attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+      const raster = () => L.tileLayer(`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(key)}`, {
+        attribution, subdomains: 'abcd', maxZoom: 19,
+      }).addTo(map);
+      if (typeof L.maplibreGL !== 'function') { raster(); return; }
+      let vector = null;
+      const fallBack = () => {
+        if (!vector) return;
+        map.removeLayer(vector);
+        vector = null;
+        raster();
+      };
+      try {
+        vector = L.maplibreGL({
+          style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+          interactive: false,
+          attributionControl: { customAttribution: attribution },
+          transformRequest: url => {
+            const requestUrl = new URL(url);
+            if (requestUrl.hostname === 'cartocdn.com' || requestUrl.hostname.endsWith('.cartocdn.com')) requestUrl.searchParams.set('key', key);
+            return { url: requestUrl.href };
+          },
+        }).addTo(map);
+        const renderer = vector.getMaplibreMap();
+        renderer.on('error', fallBack);
+        renderer.on('style.load', () => {
+          // MapLibre zooms run one below Leaflet's, so lower the label thresholds to match the main map.
+          const minimumZooms = { roadname_minor: 14, roadname_sec: 14, roadname_pri: 13, roadname_major: 12 };
+          for (const [id, minZoom] of Object.entries(minimumZooms)) {
+            if (!renderer.getLayer(id)) continue;
+            renderer.setLayerZoomRange(id, minZoom, 24);
+            renderer.setLayoutProperty(id, 'text-size', ['interpolate', ['linear'], ['zoom'], 12, 10, 14, 11, 17, 12]);
+            renderer.setPaintProperty(id, 'text-color', '#bdc5cf');
+          }
+          if (renderer.getLayer('water')) renderer.setPaintProperty('water', 'fill-color', '#202830');
+        });
+      } catch {
+        fallBack();
+      }
+    }
+
+    function renderBlocks() {
+      const sev = state.severity;
+      const blocks = lastReport.blocks
+        .map(b => ({ ...b, shown: sev ? b.severity[sev] : b.count }))
+        .filter(b => b.shown > 0)
+        .sort((a, b) => b.shown - a.shown)
+        .slice(0, 5);
+      const container = document.getElementById('blocks');
+      container.hidden = !blocks.length;
+      document.getElementById('blocks-list').innerHTML = blocks.map((b, i) => `
+        <li><span class="rank">${i + 1}</span>
+          <button type="button" data-lat="${b.lat}" data-lon="${b.lon}">${escapeHtml(b.label)}</button>
+          <span class="count">${fmt.format(b.shown)}</span></li>`).join('');
+      container.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
+        map.setView([Number(btn.dataset.lat), Number(btn.dataset.lon)], Math.max(map.getZoom(), 17));
+      }));
     }
 
     function setCenter(lat, lon, label, { fit = false } = {}) {
@@ -522,6 +593,7 @@
         renderNearby();
       }));
       renderPoints();
+      renderBlocks();
     }
 
     document.getElementById('radius-chips').addEventListener('click', event => {
