@@ -12,7 +12,7 @@ The site provides:
 - Date-based history
 - Map and list views
 - Source, severity, and agency filters
-- Monthly summaries
+- Reports: monthly counts by parish and severity, and incident counts near an address or map point
 - Mobile-friendly incident details
 
 Locations are shown only when a usable public location can be validated. Map markers identify reported locations, not guaranteed pinpoints or exact boundaries.

@@ -1,0 +1,127 @@
+[
+  {
+    "description": "MEDICAL EMERGENCY",
+    "agency": "SFD",
+    "severity": "medical"
+  },
+  {
+    "description": "CADDO EMS EVENT",
+    "agency": "EMS",
+    "severity": "medical"
+  },
+  {
+    "description": "SHOTS FIRED",
+    "agency": "SPD",
+    "severity": "high"
+  },
+  {
+    "description": "THEFT",
+    "agency": "SPD",
+    "severity": "high"
+  },
+  {
+    "description": "TRAFFIC STOP",
+    "agency": "SPD",
+    "severity": "low"
+  },
+  {
+    "description": "MINOR ACCIDENT",
+    "agency": "CSO",
+    "severity": "low"
+  },
+  {
+    "description": "TRAFFIC ACCIDENT MINOR",
+    "agency": "LAW",
+    "severity": "medium"
+  },
+  {
+    "description": "PRISONER TRANSPORT",
+    "agency": "CSO",
+    "severity": "custody"
+  },
+  {
+    "description": "PRISONER MEDICAL SECURITY",
+    "agency": "CSO",
+    "severity": "custody"
+  },
+  {
+    "description": "SPECIAL EVENT STAND BY",
+    "agency": "SFD",
+    "severity": "service"
+  },
+  {
+    "description": "MASS CASUALTY INCIDENT",
+    "agency": "EMS",
+    "severity": "high"
+  },
+  {
+    "description": "SUICIDE ATTEMPT",
+    "agency": "EMS",
+    "severity": "high"
+  },
+  {
+    "description": "MCI",
+    "agency": "SFD",
+    "severity": "high"
+  },
+  {
+    "description": "STRUCTURE FIRE",
+    "agency": "SFD",
+    "severity": "high"
+  },
+  {
+    "description": "DOMESTIC DISTURBANCE",
+    "agency": null,
+    "severity": "high"
+  },
+  {
+    "description": "BURGLAR ALARM, SILENT",
+    "agency": null,
+    "severity": "medium"
+  },
+  {
+    "description": "HANG UP CALL",
+    "agency": "",
+    "severity": "low"
+  },
+  {
+    "description": "SUSPICIOUS PERSON",
+    "agency": "SPD",
+    "severity": "medium"
+  },
+  {
+    "description": "WELFARE CONCERN",
+    "agency": "SPD",
+    "severity": "medium"
+  },
+  {
+    "description": "STALLED VEHICLE",
+    "agency": "POLICE",
+    "severity": "medium"
+  },
+  {
+    "description": "TAKEN BY OTHER AGENCY",
+    "agency": "SPD",
+    "severity": "low"
+  },
+  {
+    "description": "SERVICE CALL POLICE",
+    "agency": "",
+    "severity": "medium"
+  },
+  {
+    "description": "LOOSE LIVESTOCK",
+    "agency": "CSO",
+    "severity": "medium"
+  },
+  {
+    "description": "FIRE ALARM",
+    "agency": "SFD",
+    "severity": "high"
+  },
+  {
+    "description": "",
+    "agency": "",
+    "severity": "medium"
+  }
+]

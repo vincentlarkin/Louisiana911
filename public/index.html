@@ -82,8 +82,8 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.8.2" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=4.9.1" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -101,11 +101,11 @@
         <span class="status-value live"><span class="live-dot"></span>Live + Daily</span>
       </div>
       <div class="status-item status-update">
-        <span class="status-label">Last Update</span>
+        <span class="status-label">Updated</span>
         <span class="status-value" id="last-update">--:--</span>
       </div>
       <div class="status-item status-active">
-        <span class="status-label">Latest</span>
+        <span class="status-label">Calls</span>
         <span class="status-value" id="active-count">0</span>
       </div>
       <div class="status-item status-view">
@@ -123,6 +123,7 @@
           <span class="location-label">My Location</span>
         </button>
       </div>
+      <a class="reports-link" href="/reports/" title="Incident counts by parish and near a location">Reports</a>
       <button class="settings-btn" id="settings-btn" type="button" onclick="toggleSettingsPanel()" title="Settings" aria-label="Settings">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
         </button>
@@ -219,8 +220,8 @@
             LinkedIn
           </a>
           <a href="/reports/" class="info-link">
-            <span class="info-link-badge">RPT</span>
-            Reports
+            <span class="info-link-badge">#</span>
+            Reports: counts by parish and near a place
           </a>
           <a href="/coverage/" class="info-link">
             <span class="info-link-badge">4</span>
@@ -250,6 +251,7 @@
           <button class="incident-modal-btn secondary" id="incident-modal-share" type="button">Share incident</button>
           <button class="incident-modal-btn secondary" id="incident-modal-copy" type="button">Copy link</button>
         </div>
+        <a class="incident-modal-btn secondary hidden" id="incident-modal-nearby" href="/reports/">Past incidents near here</a>
         <a class="incident-modal-btn secondary" id="incident-modal-maps" href="#" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>
         <button class="incident-modal-btn secondary hidden" id="incident-modal-list-btn" type="button">Go to incident in list</button>
         <button class="incident-modal-btn primary" id="incident-modal-dismiss" type="button">Dismiss</button>
@@ -401,22 +403,22 @@
           <div class="filter-group" data-filter-type="urgency">
             <button class="filter-btn urgency-btn active" type="button" data-urgency="all" title="All severity levels">All</button>
             <button class="filter-btn urgency-btn urgency-high" type="button" data-urgency="high" title="High severity">
-              <span class="urgency-dot"></span>
+              <span class="urgency-dot"></span><span class="urgency-label">High</span>
             </button>
             <button class="filter-btn urgency-btn urgency-medical" type="button" data-urgency="medical" title="Medical/EMS">
-              <span class="urgency-dot"></span>
+              <span class="urgency-dot"></span><span class="urgency-label">Medical</span>
             </button>
             <button class="filter-btn urgency-btn urgency-medium" type="button" data-urgency="medium" title="Medium severity">
-              <span class="urgency-dot"></span>
+              <span class="urgency-dot"></span><span class="urgency-label">Medium</span>
             </button>
             <button class="filter-btn urgency-btn urgency-low" type="button" data-urgency="low" title="Low severity">
-              <span class="urgency-dot"></span>
+              <span class="urgency-dot"></span><span class="urgency-label">Low</span>
             </button>
             <button class="filter-btn urgency-btn urgency-service" type="button" data-urgency="service" title="Public service">
-              <span class="urgency-dot"></span>
+              <span class="urgency-dot"></span><span class="urgency-label">Service</span>
             </button>
             <button class="filter-btn urgency-btn urgency-custody" type="button" data-urgency="custody" title="Custody/Prisoner">
-              <span class="urgency-dot"></span>
+              <span class="urgency-dot"></span><span class="urgency-label">Custody</span>
             </button>
             <button class="filter-btn major-events-btn hidden" id="history-major-events" type="button" aria-pressed="false" title="Only major events: 5 or more recorded units">
               <span aria-hidden="true">◎</span> Major events <span class="major-events-threshold">5+</span>
@@ -1401,6 +1403,18 @@
       }
     }
 
+    function severityLabel(sev) {
+      switch (sev) {
+        case 'high': return 'High';
+        case 'medical': return 'Medical';
+        case 'medium': return 'Medium';
+        case 'low': return 'Low';
+        case 'service': return 'Public service';
+        case 'custody': return 'Custody';
+        default: return sev;
+      }
+    }
+
     function urgencyLabel(urgency) {
       switch (urgency) {
         case 'high': return 'high severity';
@@ -1952,6 +1966,10 @@
       }
     }
 
+    function nearbyReportUrl(lat, lon) {
+      return `/reports/?lat=${Number(lat).toFixed(5)}&lon=${Number(lon).toFixed(5)}#nearby`;
+    }
+
     function buildIncidentPopupHtml(incident, { mode = 'live' } = {}) {
       const sev = getSeverity(incident);
       const agencyDisplay = formatAgencyDisplay(incident);
@@ -1969,8 +1987,9 @@
           ${approximate ? '<div class="popup-detail"><span class="popup-label">Map</span><span class="location-accuracy-note">Approximate Location</span></div>' : ''}
           <div class="popup-detail" title="Source-reported Central time. For undated feeds, date is estimated from first observation."><span class="popup-label">Time</span>${escapeHtml(incidentTimeLabel(incident))}</div>
           <div class="popup-detail"><span class="popup-label">Agency</span>${escapeHtml(agencyDisplay)} &bull; ${escapeHtml(unitLabel)}</div>
-          <div class="popup-detail"><span class="popup-label">Severity</span>${escapeHtml(sev.toUpperCase())}</div>
+          <div class="popup-detail"><span class="popup-label">Severity</span>${escapeHtml(severityLabel(sev))}</div>
           <a class="popup-link" href="${gmaps}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>
+          <a class="popup-link" href="${nearbyReportUrl(incident.latitude, incident.longitude)}">Past incidents near here</a>
           ${shareId ? `<button class="popup-share-btn" type="button" onclick="shareIncidentByShareId('${shareId}')">Share incident</button>` : ''}
       `;
 
@@ -2181,7 +2200,7 @@
           </div>
           <div class="incident-meta">
             <span class="incident-agency ${sevClass}" title="Severity: ${sev.toUpperCase()}">${escapeHtml(agencyDisplay)}</span>
-            <span class="incident-units">${escapeHtml(sev.toUpperCase())} • ${escapeHtml(unitLabel)} • ${escapeHtml(incident.municipality || 'Unknown')}</span>
+            <span class="incident-units">${escapeHtml(severityLabel(sev))} · ${escapeHtml(unitLabel)} · ${escapeHtml(incident.municipality || 'Unknown')}</span>
             ${shareId ? `
             <button class="incident-share-btn" type="button" title="Share this incident" aria-label="Share ${escapeHtml(incident.description || 'incident')}" onclick="event.stopPropagation(); shareIncidentByShareId('${shareId}')" onkeydown="event.stopPropagation()">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"></circle><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5"></path></svg>
@@ -2218,6 +2237,7 @@
     const incidentModalTitle = document.getElementById('incident-modal-title');
     const incidentModalBody = document.getElementById('incident-modal-body');
     const incidentModalMaps = document.getElementById('incident-modal-maps');
+    const incidentModalNearby = document.getElementById('incident-modal-nearby');
     const incidentModalShare = document.getElementById('incident-modal-share');
     const incidentModalCopy = document.getElementById('incident-modal-copy');
     const incidentModalListBtn = document.getElementById('incident-modal-list-btn');
@@ -2259,7 +2279,7 @@
       incidentModalKicker.className = `incident-modal-kicker ${activity.className}`;
       incidentModalTitle.textContent = incident?.description || 'Incident';
       incidentModalBody.innerHTML = `
-        <div class="incident-modal-severity sev-${sev}">${escapeHtml(sev.toUpperCase())}</div>
+        <div class="incident-modal-severity sev-${sev}">${escapeHtml(severityLabel(sev))}</div>
         <div class="incident-modal-detail">
           <span class="incident-modal-label">Location</span>
           <span class="incident-modal-value">${escapeHtml(locationStr)}</span>
@@ -2288,6 +2308,10 @@
       `;
       incidentModalMaps.classList.toggle('hidden', !coordinates);
       incidentModalMaps.href = coordinates ? googleMapsUrl(coordinates[0], coordinates[1]) : '#';
+      if (incidentModalNearby) {
+        incidentModalNearby.classList.toggle('hidden', !coordinates || isUnknownLocation(incident));
+        incidentModalNearby.href = coordinates ? nearbyReportUrl(coordinates[0], coordinates[1]) : '/reports/';
+      }
       incidentModalIncident = incident;
       incidentModalMode = mode;
       incidentModalShare?.classList.toggle('hidden', !canShare);
@@ -2357,182 +2381,7 @@
     const infoClose = document.getElementById('info-close');
     const infoSectionTabs = Array.from(document.querySelectorAll('.info-section-tab'));
     const infoPanes = Array.from(document.querySelectorAll('.info-pane'));
-    const monthlyReportMonthInput = document.getElementById('monthly-report-month');
-    const monthlyReportSourceSelect = document.getElementById('monthly-report-source');
-    const monthlyReportRefreshBtn = document.getElementById('monthly-report-refresh');
-    const monthlyReportStatus = document.getElementById('monthly-report-status');
-    const monthlyReportView = document.getElementById('monthly-report-view');
-    const monthlyReportTitle = document.getElementById('monthly-report-title');
-    const monthlyReportSourcePill = document.getElementById('monthly-report-source-pill');
-    const monthlyReportSummary = document.getElementById('monthly-report-summary');
-    const monthlyReportTotal = document.getElementById('monthly-report-total');
-    const monthlyReportExcluded = document.getElementById('monthly-report-excluded');
-    const monthlyReportTopCount = document.getElementById('monthly-report-top-count');
-    const monthlyReportHotspotCount = document.getElementById('monthly-report-hotspot-count');
-    const monthlyReportTopShare = document.getElementById('monthly-report-top-share');
-    const monthlyReportTopType = document.getElementById('monthly-report-top-type');
-    const monthlyReportTopGeocoded = document.getElementById('monthly-report-top-geocoded');
-    const monthlyReportTopTypes = document.getElementById('monthly-report-top-types');
-    const monthlyReportHotspotAnchor = document.getElementById('monthly-report-hotspot-anchor');
-    const monthlyReportHotspotSubtitle = document.getElementById('monthly-report-hotspot-subtitle');
-    const monthlyReportMunicipalities = document.getElementById('monthly-report-municipalities');
-    const monthlyReportLocations = document.getElementById('monthly-report-locations');
-    const monthlyReportFocusBtn = document.getElementById('monthly-report-focus');
     let activeInfoTab = 'about';
-    let currentMonthlyReport = null;
-    const monthlyReportCache = new Map();
-
-    function defaultMonthlyReportMonth() {
-      const now = new Date();
-      now.setDate(1);
-      now.setMonth(now.getMonth() - 1);
-      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    }
-
-    function monthlyReportCacheKey(month, source) {
-      return `${month || ''}|${source || ''}`;
-    }
-
-    function formatReportMonthLabel(month) {
-      if (!month || typeof month !== 'string' || month.length !== 7) return 'Monthly report';
-      const [year, monthPart] = month.split('-');
-      const d = new Date(Number(year), Number(monthPart) - 1, 1);
-      if (Number.isNaN(d.getTime())) return month;
-      return d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-    }
-
-    function formatReportNumber(value) {
-      const n = Number(value || 0);
-      return Number.isFinite(n) ? n.toLocaleString('en-US') : '0';
-    }
-
-    function formatReportPercent(value) {
-      const n = Number(value || 0);
-      if (!Number.isFinite(n)) return '0%';
-      return `${(n * 100).toFixed(n >= 0.1 ? 0 : 1)}%`;
-    }
-
-    function formatReportSourcePill(source) {
-      if (source === 'all') return 'All sources';
-      if (source === 'batonrouge') return 'Baton Rouge only';
-      if (source === 'lafayette') return 'Lafayette only';
-      if (source === 'neworleans') return 'New Orleans daily log';
-      if (source === 'lakecharles') return 'Lake Charles closed calls';
-      return 'Caddo only';
-    }
-
-    function renderReportChips(target, rows, emptyLabel) {
-      if (!target) return;
-      const items = Array.isArray(rows) ? rows : [];
-      if (!items.length) {
-        target.innerHTML = `<span class="report-chip">${escapeHtml(emptyLabel)}</span>`;
-        return;
-      }
-      target.innerHTML = items.map((row) => `
-        <span class="report-chip"><strong>${escapeHtml(formatReportNumber(row?.count))}</strong> ${escapeHtml(row?.name || row?.label || 'Unknown')}</span>
-      `).join('');
-    }
-
-    function renderReportTopTypes(rows) {
-      if (!monthlyReportTopTypes) return;
-      const items = Array.isArray(rows) ? rows.slice(0, 6) : [];
-      if (!items.length) {
-        monthlyReportTopTypes.innerHTML = `<div class="report-chip">No incidents for this month.</div>`;
-        return;
-      }
-      const maxCount = Math.max(...items.map((row) => Number(row?.count || 0)), 1);
-      monthlyReportTopTypes.innerHTML = items.map((row) => {
-        const count = Number(row?.count || 0);
-        const width = Math.max(6, Math.round((count / maxCount) * 100));
-        return `
-          <div class="report-type-row">
-            <div class="report-type-meta">
-              <span class="report-type-name">${escapeHtml(row?.description || 'Unknown')}</span>
-              <span>${escapeHtml(formatReportNumber(count))}</span>
-            </div>
-            <div class="report-type-bar">
-              <div class="report-type-fill" style="width:${width}%"></div>
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-
-    function renderMonthlyReport(report) {
-      currentMonthlyReport = report;
-      const top = report?.topIncidentType || null;
-      const hotspot = top?.hotspot || null;
-
-      monthlyReportTitle.textContent = formatReportMonthLabel(report?.month);
-      monthlyReportSourcePill.textContent = formatReportSourcePill(report?.source);
-      monthlyReportSummary.textContent = report?.summary || 'No incidents available for the selected month.';
-      monthlyReportTotal.textContent = formatReportNumber(report?.totalIncidents);
-      monthlyReportExcluded.textContent = formatReportNumber(report?.excludedIncidentCount);
-      monthlyReportTopCount.textContent = formatReportNumber(top?.count);
-      monthlyReportHotspotCount.textContent = formatReportNumber(hotspot?.incidentCount);
-      monthlyReportTopShare.textContent = formatReportPercent(top?.shareOfMonth);
-      monthlyReportTopType.textContent = top?.description || 'No ranked incident type';
-      monthlyReportTopGeocoded.textContent = `${formatReportNumber(top?.geocodedCount)} geocoded`;
-      monthlyReportHotspotAnchor.textContent = hotspot?.anchor?.label || hotspot?.anchor?.municipality || 'No hotspot available';
-      monthlyReportHotspotSubtitle.textContent = hotspot
-        ? `${formatReportNumber(hotspot.incidentCount)} incidents within ${Number(hotspot.radiusMiles || 5).toFixed(0)} miles`
-        : 'No mapped hotspot available for this report';
-      renderReportTopTypes(report?.topTypes);
-      renderReportChips(monthlyReportMunicipalities, hotspot?.topMunicipalities, 'No area data');
-      renderReportChips(monthlyReportLocations, hotspot?.topLocations, 'No street data');
-      monthlyReportFocusBtn.disabled = !hotspot?.center || !Number.isFinite(Number(hotspot?.center?.latitude)) || !Number.isFinite(Number(hotspot?.center?.longitude));
-      monthlyReportView.classList.remove('hidden');
-    }
-
-    function setMonthlyReportStatus(message, kind = '') {
-      if (!monthlyReportStatus) return;
-      monthlyReportStatus.textContent = message || '';
-      monthlyReportStatus.classList.toggle('loading', kind === 'loading');
-      monthlyReportStatus.classList.toggle('error', kind === 'error');
-    }
-
-    async function loadMonthlyReport({ force = false } = {}) {
-      const month = monthlyReportMonthInput?.value || defaultMonthlyReportMonth();
-      const source = monthlyReportSourceSelect?.value || 'all';
-      if (!month) return;
-
-      const key = monthlyReportCacheKey(month, source);
-      if (!force && monthlyReportCache.has(key)) {
-        setMonthlyReportStatus(`Showing cached report for ${formatReportMonthLabel(month)}.`);
-        renderMonthlyReport(monthlyReportCache.get(key));
-        window.louisiana911Analytics?.track('monthly_report_view', { source_view: source, view_mode: 'dialog', report_month: month });
-        return;
-      }
-
-      monthlyReportView?.classList.add('hidden');
-      setMonthlyReportStatus(`Loading report for ${formatReportMonthLabel(month)}...`, 'loading');
-
-      try {
-        const params = new URLSearchParams({
-          month,
-          source,
-          radius_miles: '5',
-        });
-        const response = await fetch(`api/reports/monthly?${params.toString()}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const report = await response.json();
-        monthlyReportCache.set(key, report);
-        renderMonthlyReport(report);
-        window.louisiana911Analytics?.track('monthly_report_view', { source_view: source, view_mode: 'dialog', report_month: month });
-        const excluded = Number(report?.excludedIncidentCount || 0);
-        setMonthlyReportStatus(
-          excluded > 0
-            ? `${formatReportNumber(excluded)} "Taken by other agency" incidents were excluded from this report.`
-            : 'Report loaded.'
-        );
-      } catch (error) {
-        currentMonthlyReport = null;
-        monthlyReportView?.classList.add('hidden');
-        console.error('Failed to fetch monthly report:', error);
-        window.louisiana911Analytics?.track('report_load_error', { source_view: source, view_mode: 'dialog' });
-        setMonthlyReportStatus('Unable to load the monthly report right now.', 'error');
-      }
-    }
 
     function setInfoTab(tabName) {
       activeInfoTab = tabName === 'reports' ? 'reports' : 'about';
@@ -2546,17 +2395,6 @@
         pane.classList.toggle('active', active);
         pane.hidden = !active;
       });
-      if (activeInfoTab === 'reports') {
-        if (monthlyReportSourceSelect && !monthlyReportSourceSelect.value) {
-          monthlyReportSourceSelect.value = currentSource || 'all';
-        }
-        if (monthlyReportMonthInput && !monthlyReportMonthInput.value) {
-          monthlyReportMonthInput.value = defaultMonthlyReportMonth();
-        }
-        if (!currentMonthlyReport) {
-          loadMonthlyReport();
-        }
-      }
     }
     
     window.toggleInfoPanel = function(forceOpen) {
@@ -2565,12 +2403,6 @@
       infoModal.classList.toggle('open', next);
       infoModal.setAttribute('aria-hidden', String(!next));
       if (next) {
-        if (monthlyReportMonthInput && !monthlyReportMonthInput.value) {
-          monthlyReportMonthInput.value = defaultMonthlyReportMonth();
-        }
-        if (monthlyReportSourceSelect && !monthlyReportSourceSelect.value) {
-          monthlyReportSourceSelect.value = currentSource || 'all';
-        }
         setInfoTab(activeInfoTab);
       }
       syncModalOpenState();
@@ -2582,15 +2414,6 @@
     });
     infoSectionTabs.forEach((tab) => {
       tab.addEventListener('click', () => setInfoTab(tab.dataset.infoTab));
-    });
-    monthlyReportRefreshBtn?.addEventListener('click', () => loadMonthlyReport({ force: true }));
-    monthlyReportMonthInput?.addEventListener('change', () => loadMonthlyReport({ force: true }));
-    monthlyReportSourceSelect?.addEventListener('change', () => loadMonthlyReport({ force: true }));
-    monthlyReportFocusBtn?.addEventListener('click', () => {
-      const center = currentMonthlyReport?.topIncidentType?.hotspot?.center;
-      if (!center) return;
-      toggleInfoPanel(false);
-      smoothFocusOnPoint(Number(center.latitude), Number(center.longitude), { targetZoom: 11 });
     });
     incidentModalDismiss?.addEventListener('click', () => toggleIncidentDialog(false));
     incidentModalShare?.addEventListener('click', () => {
@@ -3779,7 +3602,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.8.2', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.9.1', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);

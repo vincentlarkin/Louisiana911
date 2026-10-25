@@ -219,7 +219,6 @@ class CanonicalOriginTests(unittest.TestCase):
             '/coverage/lafayette/',
             '/coverage/new-orleans/',
             '/reports/',
-            '/reports/monthly/',
         ):
             with self.subTest(path=path):
                 response = self.client.get(path, headers={'Host': 'localhost'})

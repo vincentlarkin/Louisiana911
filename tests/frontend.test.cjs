@@ -573,3 +573,14 @@ test('history notices respect hour-long Retry-After values', () => {
   assert.equal(ctx.historyRequestNoticeDeadline, 8200000);
   assert.match(text.textContent, /2 hours/);
 });
+
+test('map severity matches the shared cases used by report counts', () => {
+  const start = html.indexOf('    function _normalizeDesc(');
+  const end = html.indexOf('    function getSeverityClass(');
+  const ctx = vm.createContext({});
+  vm.runInContext(html.slice(start, end).replace(/^    const /gm, '    var '), ctx);
+  const cases = JSON.parse(fs.readFileSync(path.join(__dirname, 'severity_cases.json'), 'utf8'));
+  for (const { description, agency, severity } of cases) {
+    assert.equal(ctx.getSeverity({ description, agency }), severity, `${description} / ${agency}`);
+  }
+});

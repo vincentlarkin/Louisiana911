@@ -57,38 +57,30 @@
     <header class="top"><a class="brand" href="/"><span class="mark" aria-hidden="true">LA911</span><span>Louisiana911</span></a><a class="map-link" href="/?source=neworleans">Open New Orleans map</a></header>
     <nav class="crumb" aria-label="Breadcrumb"><a href="/">Louisiana911</a> / <a href="/coverage/">Coverage</a> / New Orleans</nav>
     <main id="content">
-      <section class="hero">
-        <p class="kicker">NOPD calls for service via OPCD and Data.NOLA</p>
-        <h1>New Orleans calls for service, with the delay made visible.</h1>
-        <p class="lede">Louisiana911 maps citizen-initiated NOPD calls for service from the City of New Orleans open-data system. The source is published on a delayed daily schedule, so the map shows a dynamic age banner instead of presenting it as live dispatch data.</p>
-        <div class="facts" role="group" aria-label="Coverage summary">
-          <div class="fact"><strong>Source</strong><span>Official Data.NOLA dataset</span></div>
-          <div class="fact"><strong>Timing</strong><span>Delayed daily publication</span></div>
-          <div class="fact"><strong>Location</strong><span>Public block or intersection precision</span></div>
-        </div>
-      </section>
+      <section>
+        <h2>About the New Orleans feed</h2>
+        <p>The City of New Orleans publishes NOPD calls for service on Data.NOLA once a day. Louisiana911 maps the calls that residents made. Because the city publishes daily, these calls can be many hours old, and the map shows how old the latest batch is.</p>
+        <ul class="list">
+          <li><strong>Source:</strong> Data.NOLA Calls for Service dataset</li>
+          <li><strong>Timing:</strong> Delayed, published daily</li>
+          <li><strong>Location:</strong> Block or intersection, as the city publishes it</li>
+        </ul>
 
-      <section class="panel">
-        <h2>What Louisiana911 includes</h2>
-        <p>The map uses the call's public item number, creation time, final and initial classifications, NOPD district information, published block address, and public geometry when available. Rows marked as officer-initiated are excluded from the public crime-and-safety view.</p>
-
-        <h3>What gets filtered out</h3>
-        <p>The official source includes routine administrative and officer activity that does not describe a useful public-safety event. Louisiana911 omits these generic final call types when their initial classification is also generic:</p>
+        <h3>What's left out</h3>
+        <p>Officer-initiated calls are not shown. Routine call types are also hidden when they started out as routine too:</p>
         <ul class="list">
           <li>Area Check</li><li>Business Check</li><li>Complaint Other</li><li>Disturbance (Other)</li><li>Fugitive Attachment</li><li>Incident Requested by Another Agency</li><li>Medical</li><li>Mental Patient</li><li>Return for Additional Info</li><li>Tow Impounded Vehicle (Private)</li>
         </ul>
-        <p>If a generic final type began with a material initial classification—such as theft, battery, burglary, robbery, or a protection-order violation—the record stays visible under that initial classification. Filtering changes Louisiana911's display layer; it does not alter the official dataset.</p>
+        <p>If one of these started as something more serious, such as theft, battery, burglary, robbery, or a protection-order violation, the call stays visible under that original type. This only changes what Louisiana911 displays. The city's dataset is unchanged.</p>
 
-        <h3>Approximate and missing points</h3>
-        <p>Data.NOLA sometimes supplies <code>POINT(0 0)</code> while still publishing an approximate block or intersection. Louisiana911 treats zero coordinates as missing and may geocode only that same public text. The original label remains unchanged, and the resulting map marker is dashed and explicitly approximate. A label that cannot be validated remains unmapped.</p>
+        <h3>Map locations</h3>
+        <p>Some records come with a 0,0 point but still list a block or intersection. Louisiana911 matches that text to a map point and draws the marker with a dashed outline to show it's approximate. If the text can't be matched, the call stays in the list without a marker.</p>
 
-        <h3>What a call classification means</h3>
-        <p>A calls-for-service record reflects information available to dispatch at a point in time. It is not a finding of guilt, proof that a crime occurred, or a complete account of the responding agency's final disposition.</p>
+        <h3>Limits</h3>
+        <p>A call for service records what dispatch knew at the time. It isn't proof that a crime happened, and it doesn't say how the call ended.</p>
 
-        <div class="actions"><a class="button primary" href="/?source=neworleans">View New Orleans calls</a><a class="button source" href="https://data.nola.gov/Public-Safety-and-Preparedness/Calls-for-Service-2026/es9j-6y5d" rel="noopener noreferrer">Open official Data.NOLA dataset</a></div>
+        <div class="actions"><a class="button primary" href="/?source=neworleans">View New Orleans calls</a><a class="button source" href="https://data.nola.gov/Public-Safety-and-Preparedness/Calls-for-Service-2026/es9j-6y5d" rel="noopener noreferrer">Official Data.NOLA dataset</a></div>
       </section>
-
-      <p class="notice"><strong>Not live:</strong> New Orleans data can be many hours old because the City publishes it daily. Always use official emergency channels for current danger or an active emergency.</p>
       <nav class="related" aria-label="Related coverage">Other coverage: <a href="/caddo911/">Caddo Parish</a> · <a href="/coverage/baton-rouge/">Baton Rouge</a> · <a href="/coverage/lafayette/">Lafayette Parish</a></nav>
     </main>
     <footer><span>Independent, citizen-run, and unofficial. For emergencies, call 911.</span><a href="/about/">Full methodology</a></footer>

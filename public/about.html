@@ -65,137 +65,79 @@
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #08090d;
-      --panel: #12141b;
-      --card: #171922;
-      --border: rgba(255, 255, 255, 0.1);
-      --text: #f1f2f5;
-      --dim: #a2a7b4;
-      --red: #ff4d55;
-      --blue: #5e9eff;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      padding-left: env(safe-area-inset-left);
-      padding-right: env(safe-area-inset-right);
-      background:
-        radial-gradient(circle at 12% 8%, rgba(94, 158, 255, 0.12), transparent 30%),
-        radial-gradient(circle at 88% 12%, rgba(255, 77, 85, 0.10), transparent 30%),
-        var(--bg);
-      color: var(--text);
-      font-family: 'JetBrains Mono', monospace;
-    }
-    a { color: inherit; }
-    .shell { width: min(920px, calc(100vw - 28px)); margin: 0 auto; padding: 24px 0 calc(52px + env(safe-area-inset-bottom)); }
-    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 36px; }
-    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; font-family: 'Space Grotesk', sans-serif; font-weight: 700; }
-    .mark { display: block; width: 44px; height: 44px; border: 1px solid rgba(255,77,85,.32); border-radius: 11px; background: #0a0a0f; object-fit: contain; box-shadow: 0 5px 18px rgba(0,0,0,.34); }
-    .back { padding: 10px 13px; border: 1px solid var(--border); border-radius: 9px; text-decoration: none; font-size: 11px; }
-    .hero, .notice, .source { border: 1px solid var(--border); background: rgba(18,20,27,.92); box-shadow: 0 20px 70px rgba(0,0,0,.28); }
-    .hero { padding: clamp(24px, 6vw, 54px); border-radius: 22px; }
-    .eyebrow { margin: 0 0 12px; color: var(--red); font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
-    h1, h2 { margin: 0; font-family: 'Space Grotesk', sans-serif; }
-    h1 { max-width: 760px; font-size: clamp(34px, 7vw, 62px); line-height: .98; letter-spacing: -.045em; }
-    .lede { max-width: 760px; margin: 22px 0 0; color: var(--dim); font-family: 'Space Grotesk', sans-serif; font-size: clamp(17px, 2.5vw, 21px); line-height: 1.55; }
-    .notice { margin: 18px 0 34px; padding: 17px 19px; border-color: rgba(255,77,85,.28); border-radius: 13px; color: #d9dbe2; font-size: 12px; line-height: 1.7; }
-    .sources { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
-    .source { padding: 21px; border-radius: 15px; }
-    .source h2 { font-size: 20px; }
-    .cadence { display: inline-flex; margin: 11px 0 12px; padding: 5px 8px; border: 1px solid rgba(94,158,255,.35); border-radius: 999px; color: #8bb7ff; font-size: 9px; font-weight: 700; text-transform: uppercase; }
-    .source p { margin: 0 0 16px; color: var(--dim); font-family: 'Space Grotesk', sans-serif; line-height: 1.6; }
-    .source-links { display: flex; flex-wrap: wrap; gap: 9px 15px; }
-    .source a { color: var(--blue); font-size: 11px; }
-    .source a:first-child { color: var(--text); font-weight: 700; }
-      .privacy { margin: 40px 0 0; }
-      .privacy h2 { margin-bottom: 12px; font-size: 26px; }
-      .privacy p { color: var(--dim); font-family: 'Space Grotesk', sans-serif; line-height: 1.7; }
-      .methodology ul { columns: 2; margin: 14px 0 16px; padding-left: 20px; color: var(--dim); line-height: 1.8; }
-      .methodology li { break-inside: avoid; padding-right: 18px; }
-    footer { margin-top: 42px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--dim); font-size: 10px; line-height: 1.7; }
-      @media (max-width: 640px) {
-      .shell { padding-top: max(16px, env(safe-area-inset-top)); }
-        .sources { grid-template-columns: 1fr; }
-        .methodology ul { columns: 1; }
-      .back { padding: 9px 10px; }
-    }
-  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/page.css?v=1">
 </head>
 <body>
-  <main class="shell">
-    <nav class="topbar" aria-label="Primary navigation">
-      <a class="brand" href="/"><img class="mark" src="/images/louisiana911-icon-192.png" alt="Louisiana911 logo"><span>Louisiana911</span></a>
-      <a class="back" href="/">Open incident map</a>
-    </nav>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="top">
+    <a class="brand" href="/"><img src="/images/louisiana911-icon-192.png" alt="">Louisiana 911</a>
+    <a class="top-link" href="/">Back to map</a>
+  </header>
+  <main id="content">
+    <h1>About Louisiana911</h1>
+    <p class="lede">Louisiana911 puts public incident feeds from around Louisiana on one map. It started as Caddo911, a map of Caddo Parish 911 calls.</p>
 
-    <header class="hero">
-      <p class="eyebrow">Made for Louisiana</p>
-      <h1>Public emergency information, gathered with care.</h1>
-      <p class="lede">Louisiana911 brings separate official public-safety feeds into one readable map. The project grew from the Caddo 911 monitor and now serves a wider Louisiana audience without erasing its Caddo roots.</p>
-    </header>
+    <p class="notice"><strong>This is not an emergency service.</strong> Information can be late, incomplete, changed, or removed. Don't use this site to decide whether to get help. In an emergency, call 911.</p>
 
-    <p class="notice"><strong>Louisiana911 is not an emergency service.</strong> Information can be delayed, incomplete, changed, or removed. Never use this site to decide whether to seek help. Call 911 for an emergency.</p>
-
-    <section class="sources" aria-label="Current data sources">
-      <article class="source">
-        <h2>Caddo Parish</h2><span class="cadence">Live active events</span>
-        <p>Police, fire, EMS, sheriff, and parish fire-district events from the Caddo Parish 911 public feed.</p>
-        <div class="source-links"><a href="/caddo911/">Caddo coverage details</a><a href="https://ias.ecc.caddo911.com/All_ActiveEvents.aspx" rel="noopener noreferrer">Official feed</a></div>
-      </article>
-      <article class="source">
-        <h2>Baton Rouge</h2><span class="cadence">Live traffic</span>
-        <p>Current traffic incidents and approximate map points published by the City of Baton Rouge and Parish of East Baton Rouge.</p>
-        <div class="source-links"><a href="/coverage/baton-rouge/">Baton Rouge coverage details</a><a href="https://city.brla.gov/traffic/incidents.asp" rel="noopener noreferrer">Official feed</a></div>
-      </article>
-      <article class="source">
-        <h2>Lafayette Parish</h2><span class="cadence">Live traffic</span>
-        <p>Current traffic conditions published by the Lafayette Parish Communication District.</p>
-        <div class="source-links"><a href="/coverage/lafayette/">Lafayette coverage details</a><a href="https://lafayette911.org/traffic/" rel="noopener noreferrer">Official feed</a></div>
-      </article>
-      <article class="source">
-        <h2>New Orleans</h2><span class="cadence">Daily calls for service</span>
-        <p>Citizen-initiated NOPD calls for service supplied by OPCD and published by the City at block or intersection level.</p>
-        <div class="source-links"><a href="/coverage/new-orleans/">New Orleans coverage details</a><a href="https://data.nola.gov/Public-Safety-and-Preparedness/Calls-for-Service-2026/es9j-6y5d" rel="noopener noreferrer">Official dataset</a></div>
-      </article>
-    </section>
-
-    <section class="source">
-      <h2>Lake Charles</h2><span class="cadence">Closed police calls · 24h delay</span>
-      <p>LCPD publishes closed traffic, crime-related and service calls, including officer activity. Closed calls are not a finding that a crime occurred. Coverage is limited to published LCPD records, not every agency in Calcasieu Parish.</p>
-      <p>We check the public rolling window every 30 minutes. Latest shows up to 150 calls from the past seven days; all imported calls are immediately available in History under their original call date. Units are not published. We retain generalized public labels and use only published map points; missing locations remain unmapped.</p>
-      <div class="source-links"><a href="/?source=lakecharles">View Lake Charles</a><a href="https://lakecharles.policetocitizen.com/cadcalls" rel="noopener noreferrer">Official closed-call list</a></div>
-    </section>
-
-    <section class="privacy">
-      <h2>Location uncertainty stays visible.</h2>
-      <p>Baton Rouge traffic incidents use the approximate point published by the City-Parish traffic map when one is available. If that map layer lags the incident list, Louisiana911 may derive an approximate marker from the published address range or cross-street corridor.</p>
-      <p>Louisiana911 preserves the public location label supplied by each source. When New Orleans publishes a block or intersection but supplies <code>POINT(0 0)</code> instead of a usable map point, the site may derive an approximate marker from that same public text. Those markers are larger, dashed, and explicitly labeled approximate; the displayed address is never made more specific than NOPD's published label.</p>
-    </section>
-
-    <section class="privacy methodology">
-      <h2>What Louisiana911 filters from New Orleans.</h2>
-      <p>The NOPD Calls for Service dataset includes officer activity and routine administrative traffic that is not useful for this crime and public-safety view. Louisiana911 first excludes officer-initiated rows, then omits these generic final call types:</p>
-      <ul>
-        <li>Area Check</li>
-        <li>Business Check</li>
-        <li>Complaint Other</li>
-        <li>Disturbance (Other)</li>
-        <li>Fugitive Attachment</li>
-        <li>Incident Requested by Another Agency</li>
-        <li>Medical</li>
-        <li>Mental Patient</li>
-        <li>Return for Additional Info</li>
-        <li>Tow Impounded Vehicle (Private)</li>
+    <h2>Sources</h2>
+      <ul class="sources">
+        <li>
+          <h3>Caddo Parish</h3><span class="timing">Live active calls</span>
+          <p>Police, fire, EMS, sheriff, and fire-district calls from the Caddo Parish 911 public feed.</p>
+          <div class="links"><a href="/caddo911/">About this feed</a><a href="https://ias.ecc.caddo911.com/All_ActiveEvents.aspx" rel="noopener noreferrer">Official feed</a></div>
+        </li>
+        <li>
+          <h3>Baton Rouge</h3><span class="timing">Live traffic incidents</span>
+          <p>Traffic incidents and approximate map points from the City of Baton Rouge and Parish of East Baton Rouge.</p>
+          <div class="links"><a href="/coverage/baton-rouge/">About this feed</a><a href="https://city.brla.gov/traffic/incidents.asp" rel="noopener noreferrer">Official feed</a></div>
+        </li>
+        <li>
+          <h3>Lafayette Parish</h3><span class="timing">Live traffic incidents</span>
+          <p>Traffic incidents from the Lafayette Parish Communication District, with the responding unit when listed.</p>
+          <div class="links"><a href="/coverage/lafayette/">About this feed</a><a href="https://lafayette911.org/traffic/" rel="noopener noreferrer">Official feed</a></div>
+        </li>
+        <li>
+          <h3>New Orleans</h3><span class="timing">Calls for service, published daily</span>
+          <p>NOPD calls made by residents, released by the City through Data.NOLA at block or intersection level.</p>
+          <div class="links"><a href="/coverage/new-orleans/">About this feed</a><a href="https://data.nola.gov/Public-Safety-and-Preparedness/Calls-for-Service-2026/es9j-6y5d" rel="noopener noreferrer">Official dataset</a></div>
+        </li>
+        <li>
+          <h3>Lake Charles</h3><span class="timing">Closed police calls, 24-hour delay</span>
+          <p>LCPD's closed traffic, crime-related, and service calls, including officer activity. Map points are generalized by the source.</p>
+          <div class="links"><a href="/?source=lakecharles">View on map</a><a href="https://lakecharles.policetocitizen.com/cadcalls" rel="noopener noreferrer">Official list</a></div>
+        </li>
       </ul>
-      <p>If a generic final type began with a non-generic initial classification, Louisiana911 keeps it under that initial classification. This safeguard retains potentially material reports such as theft, battery, burglary, robbery, or protection-order violations while still removing routine city noise.</p>
-    </section>
 
-    <footer>Citizen-run and independently maintained by Vincent Larkin. Not affiliated with or endorsed by any government, 911 district, or responding agency.</footer>
+    <h2>Lake Charles details</h2>
+    <p>LCPD publishes closed calls, not live ones. A closed call isn't a finding that a crime happened, and the list covers LCPD only, not every agency in Calcasieu Parish.</p>
+    <p>Louisiana911 checks the public list every 30 minutes. Latest shows up to 150 calls from the past seven days, and every imported call is in History under its original date. LCPD doesn't publish units. Only the source's own map points are used; calls without one stay unmapped.</p>
+
+    <h2>Map locations</h2>
+    <p>Each source's location text is shown as published. Markers are placed only when a location can be matched with confidence. Approximate markers are larger and have a dashed outline.</p>
+    <p>Baton Rouge markers use the approximate point from the City-Parish traffic map. When that map is behind the incident list, Louisiana911 may place the marker from the published address range or cross street.</p>
+    <p>When New Orleans lists a block or intersection but gives a 0,0 point, Louisiana911 matches that same text to a map point and marks it approximate. The address shown is never more specific than what NOPD published.</p>
+
+    <h2>What's hidden from New Orleans</h2>
+    <p>The NOPD dataset includes officer activity and routine administrative calls. Louisiana911 leaves out officer-initiated calls, plus these routine call types:</p>
+    <ul>
+      <li>Area Check</li>
+      <li>Business Check</li>
+      <li>Complaint Other</li>
+      <li>Disturbance (Other)</li>
+      <li>Fugitive Attachment</li>
+      <li>Incident Requested by Another Agency</li>
+      <li>Medical</li>
+      <li>Mental Patient</li>
+      <li>Return for Additional Info</li>
+      <li>Tow Impounded Vehicle (Private)</li>
+    </ul>
+    <p>If one of these started as something more serious, such as theft, battery, burglary, robbery, or a protection-order violation, it stays visible under that original type.</p>
+
+    <h2>Colors</h2>
+    <p>Red is high severity, yellow is medium, blue is low, green is public service, and gray is custody. Red-and-white stripes mean medical. Louisiana911 assigns these colors from the call description; they are not official classifications. <a href="/reports/">Reports</a> uses the same colors.</p>
+
+    <footer>Run independently by Vincent Larkin. Not affiliated with or endorsed by any government, 911 district, or responding agency. <a href="https://github.com/vincentlarkin/Louisiana911" rel="noopener noreferrer">Source code</a></footer>
   </main>
 </body>
 </html>

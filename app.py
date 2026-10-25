@@ -19,6 +19,7 @@ import sys
 import math
 import re
 import json
+import functools
 import html as html_module
 from urllib.parse import urlsplit
 from difflib import SequenceMatcher
@@ -93,7 +94,6 @@ DB_PATH = _resolve_db_path()
 # Archive settings: incidents older than this many days get moved to monthly archive DBs
 ARCHIVE_AFTER_DAYS = int(_env_setting('LOUISIANA911_ARCHIVE_DAYS', 'CADDO911_ARCHIVE_DAYS', '30'))
 BACKUP_RETENTION_WEEKS = int(_env_setting('LOUISIANA911_BACKUP_RETENTION_WEEKS', 'CADDO911_BACKUP_RETENTION_WEEKS', '5'))
-REPORT_CACHE_VERSION = 4
 
 def _get_archive_dir() -> str:
     """Get the directory where archive DBs are stored (same dir as main DB)."""
@@ -123,10 +123,6 @@ def _get_backup_dir() -> str:
         return configured
     return os.path.join(_get_archive_dir(), "backups")
 
-
-def _get_report_cache_dir() -> str:
-    """Directory where static monthly report JSON files are written."""
-    return os.path.join(_get_archive_dir(), "report_cache")
 
 def _backup_label_for_path(path: str) -> str:
     """Stable label for backup file naming."""
@@ -649,6 +645,8 @@ AUTH_PASS = _env_setting('LOUISIANA911_AUTH_PASS', 'CADDO911_AUTH_PASS') or None
 
 REPORT_PAGE_RATE_LIMIT = int(_env_setting('LOUISIANA911_REPORT_PAGE_RATE_LIMIT', 'CADDO911_REPORT_PAGE_RATE_LIMIT', '120'))
 REPORT_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_REPORT_API_RATE_LIMIT', 'CADDO911_REPORT_API_RATE_LIMIT', '90'))
+# Address lookups call an outside geocoder, so they get a much smaller budget.
+REPORT_GEOCODE_RATE_LIMIT = int(_env_setting('LOUISIANA911_REPORT_GEOCODE_RATE_LIMIT', 'CADDO911_REPORT_GEOCODE_RATE_LIMIT', '15'))
 INCIDENT_ACTIVE_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_ACTIVE_API_RATE_LIMIT', 'CADDO911_ACTIVE_API_RATE_LIMIT', '120'))
 INCIDENT_HISTORY_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_HISTORY_API_RATE_LIMIT', 'CADDO911_HISTORY_API_RATE_LIMIT', '10'))
 INCIDENT_OTHER_API_RATE_LIMIT = int(_env_setting('LOUISIANA911_OTHER_API_RATE_LIMIT', 'CADDO911_OTHER_API_RATE_LIMIT', '90'))
@@ -1060,6 +1058,8 @@ def _report_rate_bucket(path: str) -> tuple[str, int] | None:
         return 'incident-history-api', INCIDENT_HISTORY_REQUEST_RATE_LIMIT
     if clean_path == '/api/incidents/history_counts':
         return 'incident-history-counts-api', INCIDENT_OTHER_API_RATE_LIMIT
+    if clean_path == '/api/reports/geocode':
+        return 'report-geocode-api', REPORT_GEOCODE_RATE_LIMIT
     if clean_path.startswith('/api/reports/'):
         return 'report-api', REPORT_API_RATE_LIMIT
     if clean_path.startswith('/api/'):
@@ -3092,87 +3092,6 @@ def _incident_matches_source_filter(incident: dict, source_filter: str) -> bool:
     return _normalize_incident_source_for_read(incident.get('source')) == source_filter
 
 
-def _query_month_incidents_from_conn(
-    conn: sqlite3.Connection,
-    month: str,
-    source_filter: str,
-    *,
-    ensure_source_column: bool = False,
-) -> list[dict]:
-    """Read incidents for a Central month from one SQLite database."""
-    bounds = _central_month_bounds_utc(month)
-    if not bounds:
-        return []
-
-    start_utc, end_utc = bounds
-    cursor = conn.cursor()
-    has_source_column = _ensure_incidents_source_column(conn) if ensure_source_column else _incidents_table_has_source_column(cursor)
-
-    if source_filter == 'all':
-        sql = 'SELECT * FROM incidents WHERE first_seen >= ? AND first_seen < ? ORDER BY first_seen DESC'
-        args: tuple = (start_utc, end_utc)
-    elif source_filter == 'caddo':
-        if has_source_column:
-            sql = (
-                "SELECT * FROM incidents WHERE first_seen >= ? AND first_seen < ? "
-                "AND (source = 'caddo' OR source IS NULL OR TRIM(source) = '') "
-                "ORDER BY first_seen DESC"
-            )
-            args = (start_utc, end_utc)
-        else:
-            sql = 'SELECT * FROM incidents WHERE first_seen >= ? AND first_seen < ? ORDER BY first_seen DESC'
-            args = (start_utc, end_utc)
-    elif not has_source_column:
-        return []
-    else:
-        sql = 'SELECT * FROM incidents WHERE first_seen >= ? AND first_seen < ? AND source = ? ORDER BY first_seen DESC'
-        args = (start_utc, end_utc, source_filter)
-
-    try:
-        cursor.execute(sql, args)
-    except sqlite3.OperationalError:
-        if source_filter not in ('all', 'caddo'):
-            return []
-        cursor.execute(
-            'SELECT * FROM incidents WHERE first_seen >= ? AND first_seen < ? ORDER BY first_seen DESC',
-            (start_utc, end_utc),
-        )
-
-    rows = [dict(row) for row in cursor.fetchall()]
-    for row in rows:
-        row['source'] = _normalize_incident_source_for_read(row.get('source'))
-    return rows
-
-
-def _load_month_incidents(month: str, source_filter: str) -> list[dict]:
-    """Load incidents for a month from the main DB plus the month archive DB, if present."""
-    incidents_by_hash: dict[str, dict] = {}
-
-    conn = db_connect(row_factory=True)
-    try:
-        for row in _query_month_incidents_from_conn(conn, month, source_filter, ensure_source_column=True):
-            key = str(row.get('hash') or f"main:{row.get('id')}")
-            if key not in incidents_by_hash:
-                incidents_by_hash[key] = row
-    finally:
-        conn.close()
-
-    for archive_path in _get_archive_dbs_for_month(month):
-        try:
-            archive_conn = _archive_db_connect(archive_path, row_factory=True)
-            try:
-                for row in _query_month_incidents_from_conn(archive_conn, month, source_filter):
-                    key = str(row.get('hash') or f"{archive_path}:{row.get('id')}")
-                    if key not in incidents_by_hash:
-                        incidents_by_hash[key] = row
-            finally:
-                archive_conn.close()
-        except Exception as e:
-            log(f"[ARCHIVE] Error reading {archive_path}: {e}")
-
-    return list(incidents_by_hash.values())
-
-
 def _incident_location_label(incident: dict) -> str | None:
     street = _clean_ws(incident.get('street') or '')
     cross = _clean_ws(incident.get('cross_streets') or '')
@@ -3189,888 +3108,355 @@ def _incident_location_label(incident: dict) -> str | None:
     return None
 
 
-def _incident_coordinates(incident: dict) -> tuple[float, float] | None:
-    try:
-        lat = float(incident.get('latitude'))
-        lon = float(incident.get('longitude'))
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(lat) or not math.isfinite(lon):
-        return None
-    return lat, lon
-
-
-def _top_counts(values: list[str], *, limit: int = 5, label_key: str = 'label') -> list[dict]:
-    counts: dict[str, int] = {}
-    for value in values:
-        clean = _clean_ws(value)
-        if not clean:
-            continue
-        counts[clean] = counts.get(clean, 0) + 1
-    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
-    return [{label_key: label, 'count': count} for label, count in ranked[:limit]]
-
-
-DEFAULT_MONTHLY_REPORT_EXCLUDED_TYPES = {
-    'TAKEN BY OTHER AGENCY',
-    'CITIZEN ASSISTANCE',
-    'CADDO EMS EVENT',
+# Severity mirrors getSeverity() in public/index.html so report counts use the
+# same colors as the map. tests/severity_cases.json keeps the two in step.
+SEVERITY_ORDER = ['high', 'medical', 'medium', 'low', 'service', 'custody']
+FORCE_HIGH_SEVERITY_TERMS = [
+    'mass casualty', 'mass casualties', 'multiple casualty',
+    'mass casulty', 'mass causality',
+    'suicide attempt', 'attempted suicide',
+]
+SEVERITY_TERMS = {
+    'custody': ['prisoner'],
+    'medical': ['medical emergency', 'caddo ems event'],
+    'service': ['special event stand by', 'public service'],
+    'low': [
+        'deliver message', 'prisoner medical security', 'periodic check', 'taken by other agency',
+        'follow up', 'followup', 'follow', 'investigation', 'report', 'information',
+        'citizen assist', 'citizen assistance', 'assist citizen', 'civil',
+        'welfare check', 'wellness check', 'property check', 'extra patrol', 'directed patrol',
+        'noise', 'complaint', 'parking', 'traffic control', 'traffic stop',
+        'lost property', 'found property',
+        'hang up', 'hangup', 'open line to 911', 'open 911 line', '911 open line',
+    ],
+    'high': [
+        'shots fired', 'shooting', 'shot fired', 'gun', 'armed', 'weapon',
+        'stabbing', 'stab', 'knife',
+        'assault', 'battery', 'domestic', 'fight',
+        'robbery', 'home invasion', 'kidnap', 'hostage',
+        'homicide', 'murder', 'rape', 'sexual',
+        'theft', 'burglary', 'vehicle burglary', 'break in', 'breaking entering',
+        'structure fire', 'house fire', 'apartment fire', 'building fire',
+        'fire', 'smoke', 'explosion',
+        'medical', 'ems', 'unconscious', 'not breathing', 'difficulty breathing', 'choking',
+        'overdose', 'cardiac', 'heart', 'stroke', 'seizure',
+        'hit and run', 'hit run', 'injury accident', 'accident with injuries', 'fatal', 'entrap', 'rollover',
+    ],
+    'medium': [
+        'stolen', 'shoplift', 'vandal',
+        'accident', 'crash', 'wreck', 'collision', 'mvc', 'mva',
+        'road hazard', 'debris', 'disabled vehicle',
+        'loose livestock', 'livestock', 'loose animal', 'animal in roadway', 'cow', 'horse',
+        'disturbance', 'suspicious', 'trespass', 'harassment', 'fraud', 'alarm',
+        'juvenile complaint',
+    ],
 }
 
 
-def _normalize_report_excluded_descriptions(raw_values: list[str] | None = None) -> set[str]:
-    values = raw_values if raw_values is not None else list(DEFAULT_MONTHLY_REPORT_EXCLUDED_TYPES)
-    normalized: set[str] = set()
-    for value in values:
-        clean = _clean_ws(value or '')
-        if clean:
-            normalized.add(clean.upper())
-    return normalized
+@functools.lru_cache(maxsize=8192)
+def incident_severity(description: str | None, agency: str | None) -> str:
+    d = re.sub(r'\s+', ' ', re.sub(r'[^a-z0-9]+', ' ', str(description or '').lower())).strip()
+    agency = str(agency or '').upper()
+
+    def has_any(terms):
+        return any(term in d for term in terms)
+
+    if 'minor accident' in d or 'minor crash' in d or 'fender bender' in d:
+        return 'low'
+    if has_any(FORCE_HIGH_SEVERITY_TERMS) or ' mci ' in f' {d} ':
+        return 'high'
+    if has_any(SEVERITY_TERMS['custody']):
+        return 'custody'
+    if 'EMS' in agency or has_any(SEVERITY_TERMS['medical']):
+        return 'medical'
+    for level in ('service', 'high', 'low', 'medium'):
+        if has_any(SEVERITY_TERMS[level]):
+            return level
+    return 'medium'
 
 
-def _query_report_rows_from_conn(
-    conn: sqlite3.Connection,
-    source_filter: str,
-    *,
-    ensure_source_column: bool = False,
-) -> list[dict]:
-    """Read lightweight rows needed for report availability checks."""
-    cursor = conn.cursor()
-    has_source_column = _ensure_incidents_source_column(conn) if ensure_source_column else _incidents_table_has_source_column(cursor)
-
-    if source_filter == 'all':
-        sql = 'SELECT first_seen, description, source FROM incidents' if has_source_column else 'SELECT first_seen, description, NULL as source FROM incidents'
-        args: tuple = ()
-    elif source_filter == 'caddo':
-        if has_source_column:
-            sql = (
-                "SELECT first_seen, description, source FROM incidents "
-                "WHERE source = 'caddo' OR source IS NULL OR TRIM(source) = ''"
-            )
-            args = ()
-        else:
-            sql = 'SELECT first_seen, description, NULL as source FROM incidents'
-            args = ()
-    elif not has_source_column:
-        return []
-    else:
-        sql = 'SELECT first_seen, description, source FROM incidents WHERE source = ?'
-        args = (source_filter,)
-
-    try:
-        cursor.execute(sql, args)
-    except sqlite3.OperationalError:
-        if source_filter not in ('all', 'caddo'):
-            return []
-        cursor.execute('SELECT first_seen, description, NULL as source FROM incidents')
-
-    rows = [dict(row) for row in cursor.fetchall()]
-    for row in rows:
-        row['source'] = _normalize_incident_source_for_read(row.get('source'))
-    return rows
+REPORT_SOURCE_LABELS = {
+    'caddo': 'Caddo Parish',
+    'batonrouge': 'Baton Rouge',
+    'lafayette': 'Lafayette Parish',
+    'neworleans': 'New Orleans',
+    'lakecharles': 'Lake Charles',
+}
+REPORT_NEARBY_RADII = (0.1, 0.25, 0.5, 1.0, 2.0)
+REPORT_NEARBY_DAYS = (30, 90, 365, 0)  # 0 = everything on record
+REPORT_NEARBY_LIST_LIMIT = 100
+REPORT_NEARBY_POINT_LIMIT = 1500
+REPORT_CACHE_TTL_SECONDS = 120
+_report_cache: dict[tuple, tuple[float, dict]] = {}
+_report_cache_lock = Lock()
+_report_geocode_cache: dict[str, list[dict]] = {}
 
 
-def _available_report_months(
-    source_filter: str,
-    *,
-    excluded_descriptions: set[str] | None = None,
-) -> list[str]:
-    excluded = excluded_descriptions if excluded_descriptions is not None else _normalize_report_excluded_descriptions()
-    cache_key = (source_filter, tuple(sorted(excluded)))
-    now = time.monotonic()
-    cached = _available_report_months_cache.get(cache_key)
-    if cached and now - cached[0] <= REPORT_MAP_PERIOD_CACHE_TTL_SECONDS:
-        return list(cached[1])
+def _report_cache_get(key: tuple, ttl: float | None) -> dict | None:
+    with _report_cache_lock:
+        hit = _report_cache.get(key)
+    if hit and (ttl is None or time.monotonic() - hit[0] <= ttl):
+        return hit[1]
+    return None
 
+
+def _report_cache_put(key: tuple, value: dict) -> None:
+    with _report_cache_lock:
+        _report_cache[key] = (time.monotonic(), value)
+        if len(_report_cache) > 256:
+            _report_cache.pop(min(_report_cache, key=lambda k: _report_cache[k][0]), None)
+
+
+def _report_db_paths(months: list[str] | None) -> list[str]:
+    """Main DB first, then the archives for the given Central months (None = all)."""
+    if months is None:
+        return [DB_PATH] + _list_archive_dbs()
+    paths = [DB_PATH]
+    for month in months:
+        paths.extend(_get_archive_dbs_for_month(month))
+    return paths
+
+
+def _iter_report_rows(paths: list[str], sql_where: str, args: tuple, columns: str):
+    """Yield incident rows once each across the main DB and archives."""
+    seen: set[str] = set()
+    for path in paths:
+        try:
+            if path == DB_PATH:
+                conn = db_connect(row_factory=True)
+            else:
+                conn = _archive_db_connect(path, row_factory=True)
+        except Exception as e:
+            log(f"[REPORTS] Error opening {path}: {e}")
+            continue
+        try:
+            rows = conn.execute(f"SELECT hash, {columns} FROM incidents WHERE {sql_where}", args).fetchall()
+        except sqlite3.OperationalError as e:
+            log(f"[REPORTS] Error reading {path}: {e}")
+            rows = []
+        finally:
+            conn.close()
+        for index, row in enumerate(rows):
+            key = row['hash'] or f"{path}:{index}"
+            if key in seen:
+                continue
+            seen.add(key)
+            yield row
+
+
+def _report_available_months() -> list[str]:
+    cached = _report_cache_get(('months',), REPORT_CACHE_TTL_SECONDS)
+    if cached is not None:
+        return cached['months']
     months: set[str] = set()
-
-    conn = db_connect(row_factory=True)
+    for path in _list_archive_dbs():
+        match = re.search(r'_(\d{4})_(\d{2})\.db$', path)
+        if match:
+            months.add(f"{match.group(1)}-{match.group(2)}")
+    conn = db_connect()
     try:
-        rows = _query_report_rows_from_conn(conn, source_filter, ensure_source_column=True)
+        first, last = conn.execute('SELECT MIN(first_seen), MAX(first_seen) FROM incidents').fetchone()
     finally:
         conn.close()
-
-    for row in rows:
-        description = _clean_ws(row.get('description') or '')
-        if description.upper() in excluded:
-            continue
-        month_key = _central_month_key(row.get('first_seen'))
-        if month_key:
-            months.add(month_key)
-
-    for archive_path in _list_archive_dbs():
-        try:
-            archive_conn = _archive_db_connect(archive_path, row_factory=True)
-            try:
-                rows = _query_report_rows_from_conn(archive_conn, source_filter)
-            finally:
-                archive_conn.close()
-        except Exception as e:
-            log(f"[ARCHIVE] Error reading {archive_path}: {e}")
-            continue
-
-        for row in rows:
-            description = _clean_ws(row.get('description') or '')
-            if description.upper() in excluded:
-                continue
-            month_key = _central_month_key(row.get('first_seen'))
-            if month_key:
-                months.add(month_key)
-
+    start, end = _central_month_key(first), _central_month_key(last)
+    if start and end:
+        year, month = map(int, start.split('-'))
+        while f"{year:04d}-{month:02d}" <= end:
+            months.add(f"{year:04d}-{month:02d}")
+            year, month = (year + 1, 1) if month == 12 else (year, month + 1)
     result = sorted(months, reverse=True)
-    _available_report_months_cache[cache_key] = (now, result)
-    if len(_available_report_months_cache) > 8:
-        oldest_key = min(_available_report_months_cache, key=lambda key: _available_report_months_cache[key][0])
-        _available_report_months_cache.pop(oldest_key, None)
-    return list(result)
+    _report_cache_put(('months',), {'months': result})
+    return result
 
 
-def _is_past_month(month: str) -> bool:
-    current_month = datetime.now(CENTRAL_TZ).strftime('%Y-%m')
-    return month < current_month
+def _previous_month(month: str) -> str:
+    year, mon = map(int, month.split('-'))
+    return f"{year - 1:04d}-12" if mon == 1 else f"{year:04d}-{mon - 1:02d}"
 
 
-def _monthly_report_cache_path(month: str, source_filter: str, radius_miles: float) -> str:
-    safe_source = re.sub(r'[^a-z0-9_-]+', '_', (source_filter or 'all').lower()).strip('_') or 'all'
-    safe_radius = re.sub(r'[^0-9a-z_-]+', '_', f"{float(radius_miles):g}mi")
-    filename = f"monthly_report_v{REPORT_CACHE_VERSION}_{safe_source}_{month}_{safe_radius}.json"
-    return os.path.join(_get_report_cache_dir(), filename)
-
-
-def _load_cached_monthly_report(month: str, source_filter: str, radius_miles: float) -> dict | None:
-    path = _monthly_report_cache_path(month, source_filter, radius_miles)
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, 'r', encoding='utf-8') as fh:
-            data = json.load(fh)
-        if int(data.get('cacheVersion') or 0) != REPORT_CACHE_VERSION:
-            return None
-        if abs(float(data.get('radiusMiles') or 0) - float(radius_miles)) > 1e-9:
-            return None
-        return data
-    except Exception:
-        return None
-
-
-def _save_cached_monthly_report(report: dict) -> None:
-    month = str(report.get('month') or '')
-    source_filter = str(report.get('source') or 'all')
-    radius_miles = float(report.get('radiusMiles') or 0)
-    if not month:
-        return
-    cache_dir = _get_report_cache_dir()
-    os.makedirs(cache_dir, exist_ok=True)
-    path = _monthly_report_cache_path(month, source_filter, radius_miles)
-    payload = dict(report)
-    payload['cacheVersion'] = REPORT_CACHE_VERSION
-    payload['isStatic'] = True
-    with open(path, 'w', encoding='utf-8') as fh:
-        json.dump(payload, fh, ensure_ascii=True, separators=(',', ':'))
-
-
-def _build_hotspot_summary(incidents: list[dict], radius_miles: float) -> dict | None:
-    points: list[tuple[dict, float, float]] = []
-    for incident in incidents:
-        coords = _incident_coordinates(incident)
-        if coords is None:
-            continue
-        lat, lon = coords
-        points.append((incident, lat, lon))
-
-    if not points:
-        return None
-
-    radius_m = max(float(radius_miles), 0.1) * 1609.344
-    best_cluster: list[tuple[dict, float, float, float]] = []
-    best_avg_distance: float | None = None
-
-    for anchor_incident, anchor_lat, anchor_lon in points:
-        cluster: list[tuple[dict, float, float, float]] = []
-        total_distance = 0.0
-        for incident, lat, lon in points:
-            dist_m = _haversine_m(anchor_lat, anchor_lon, lat, lon)
-            if dist_m <= radius_m:
-                cluster.append((incident, lat, lon, dist_m))
-                total_distance += dist_m
-
-        if not cluster:
-            continue
-
-        avg_distance = total_distance / len(cluster)
-        is_better = False
-        if len(cluster) > len(best_cluster):
-            is_better = True
-        elif len(cluster) == len(best_cluster):
-            if best_avg_distance is None or avg_distance < best_avg_distance:
-                is_better = True
-
-        if is_better:
-            best_cluster = cluster
-            best_avg_distance = avg_distance
-
-    if not best_cluster:
-        return None
-
-    center_lat = sum(lat for _, lat, _, _ in best_cluster) / len(best_cluster)
-    center_lon = sum(lon for _, _, lon, _ in best_cluster) / len(best_cluster)
-
-    top_municipalities = _top_counts(
-        [incident.get('municipality') or '' for incident, _, _, _ in best_cluster],
-        label_key='name',
-    )
-    top_locations = _top_counts(
-        [_incident_location_label(incident) or '' for incident, _, _, _ in best_cluster],
+def _month_source_rows(month: str):
+    start_utc, end_utc = _central_month_bounds_utc(month)
+    return _iter_report_rows(
+        _report_db_paths([month]),
+        'first_seen >= ? AND first_seen < ?',
+        (start_utc, end_utc),
+        'source, description, agency',
     )
 
-    anchor_incident, anchor_lat, anchor_lon, _ = min(best_cluster, key=lambda item: item[3])
 
-    return {
-        'incidentCount': len(best_cluster),
-        'radiusMiles': radius_miles,
-        'center': {
-            'latitude': round(center_lat, 6),
-            'longitude': round(center_lon, 6),
-        },
-        'anchor': {
-            'latitude': round(anchor_lat, 6),
-            'longitude': round(anchor_lon, 6),
-            'label': _incident_location_label(anchor_incident),
-            'municipality': anchor_incident.get('municipality'),
-        },
-        'topMunicipalities': top_municipalities,
-        'topLocations': top_locations,
-    }
+def _build_parish_summary(month: str) -> dict:
+    per_source: dict[str, dict] = {}
+    for row in _month_source_rows(month):
+        source = _normalize_incident_source_for_read(row['source'])
+        entry = per_source.setdefault(source, {'total': 0, 'severity': dict.fromkeys(SEVERITY_ORDER, 0), 'types': {}})
+        severity = incident_severity(row['description'], row['agency'])
+        description = _clean_ws(row['description'] or '') or 'Unlisted'
+        entry['total'] += 1
+        entry['severity'][severity] += 1
+        type_entry = entry['types'].setdefault(description, {'count': 0, 'severity': dict.fromkeys(SEVERITY_ORDER, 0)})
+        type_entry['count'] += 1
+        type_entry['severity'][severity] += 1
 
+    previous_totals: dict[str, int] = {}
+    previous = _previous_month(month)
+    if previous in _report_available_months():
+        for row in _month_source_rows(previous):
+            source = _normalize_incident_source_for_read(row['source'])
+            previous_totals[source] = previous_totals.get(source, 0) + 1
 
-def _build_monthly_report(
-    month: str,
-    source_filter: str,
-    radius_miles: float,
-    *,
-    excluded_descriptions: set[str] | None = None,
-) -> dict:
-    incidents = _load_month_incidents(month, source_filter)
-    incidents.sort(key=lambda row: row.get('first_seen') or '')
-    excluded = excluded_descriptions if excluded_descriptions is not None else _normalize_report_excluded_descriptions()
-
-    included_incidents: list[dict] = []
-    excluded_count = 0
-    for incident in incidents:
-        description = _clean_ws(incident.get('description') or '')
-        if description.upper() in excluded:
-            excluded_count += 1
+    sources = []
+    for source in REPORT_SOURCE_LABELS:
+        entry = per_source.get(source)
+        if not entry:
             continue
-        included_incidents.append(incident)
+        ranked = sorted(entry['types'].items(), key=lambda item: (-item[1]['count'], item[0]))
+        sources.append({
+            'key': source,
+            'label': REPORT_SOURCE_LABELS[source],
+            'total': entry['total'],
+            'previousTotal': previous_totals.get(source),
+            'severity': entry['severity'],
+            'types': [
+                {
+                    'description': description,
+                    'count': data['count'],
+                    # A description can straddle levels only through agency (EMS); report the majority.
+                    'severity': max(SEVERITY_ORDER, key=lambda level: data['severity'][level]),
+                }
+                for description, data in ranked[:40]
+            ],
+        })
+    return {'month': month, 'sources': sources}
 
-    by_type: dict[str, int] = {}
-    for incident in included_incidents:
-        description = _clean_ws(incident.get('description') or '')
-        if not description:
+
+def _parse_report_float(name: str) -> float | None:
+    value = request.args.get(name, type=float)
+    return value if value is not None and math.isfinite(value) else None
+
+
+def _in_report_coverage(lat: float, lon: float) -> bool:
+    return any(
+        profile['lat_min'] - 0.05 <= lat <= profile['lat_max'] + 0.05
+        and profile['lon_min'] - 0.05 <= lon <= profile['lon_max'] + 0.05
+        for profile in SOURCE_GEO_PROFILES.values()
+    )
+
+
+def _build_nearby_report(lat: float, lon: float, radius_miles: float, days: int) -> dict:
+    lat_pad = radius_miles / 69.0
+    lon_pad = radius_miles / (69.0 * max(math.cos(math.radians(lat)), 0.2))
+    where = 'latitude BETWEEN ? AND ? AND longitude BETWEEN ? AND ?'
+    args: tuple = (lat - lat_pad, lat + lat_pad, lon - lon_pad, lon + lon_pad)
+    months = None
+    if days:
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        where += ' AND first_seen >= ?'
+        args += (since.isoformat(),)
+        months = []
+        cursor_month = _central_month_key(since.isoformat())
+        current = datetime.now(CENTRAL_TZ).strftime('%Y-%m')
+        while cursor_month and cursor_month <= current:
+            months.append(cursor_month)
+            year, mon = map(int, cursor_month.split('-'))
+            cursor_month = f"{year + 1:04d}-01" if mon == 12 else f"{year:04d}-{mon + 1:02d}"
+
+    radius_m = radius_miles * 1609.344
+    matches = []
+    for row in _iter_report_rows(
+        _report_db_paths(months), where, args,
+        'source, description, agency, time, units, street, cross_streets, municipality, '
+        'latitude, longitude, first_seen, geocode_quality',
+    ):
+        if _is_unknown_location(row['street'], row['cross_streets']):
             continue
-        by_type[description] = by_type.get(description, 0) + 1
+        distance_m = _haversine_m(lat, lon, row['latitude'], row['longitude'])
+        if distance_m > radius_m:
+            continue
+        incident = dict(row)
+        incident['source'] = _normalize_incident_source_for_read(incident['source'])
+        incident['severity'] = incident_severity(incident['description'], incident['agency'])
+        incident['distance_m'] = distance_m
+        matches.append(incident)
 
-    top_types = sorted(by_type.items(), key=lambda item: (-item[1], item[0]))
-    top_incident_type = None
-    hotspot = None
+    matches.sort(key=lambda item: item['first_seen'] or '', reverse=True)
+    severity_counts = dict.fromkeys(SEVERITY_ORDER, 0)
+    source_counts: dict[str, int] = {}
+    month_counts: dict[str, int] = {}
+    types: dict[str, dict] = {}
+    approximate = 0
+    for incident in matches:
+        severity_counts[incident['severity']] += 1
+        source_counts[incident['source']] = source_counts.get(incident['source'], 0) + 1
+        month_key = _central_month_key(incident['first_seen'])
+        if month_key:
+            month_counts[month_key] = month_counts.get(month_key, 0) + 1
+        if str(incident.get('geocode_quality') or '').startswith('approximate'):
+            approximate += 1
+        description = _clean_ws(incident['description'] or '') or 'Unlisted'
+        entry = types.setdefault(description, {'description': description, 'count': 0, 'severity': incident['severity']})
+        entry['count'] += 1
 
-    if top_types:
-        top_description, top_count = top_types[0]
-        top_incidents = [
-            incident for incident in included_incidents
-            if _clean_ws(incident.get('description') or '') == top_description
-        ]
-        hotspot = _build_hotspot_summary(top_incidents, radius_miles)
-        top_incident_type = {
-            'description': top_description,
-            'count': top_count,
-            'shareOfMonth': round(top_count / len(included_incidents), 4) if included_incidents else 0.0,
-            'geocodedCount': sum(1 for incident in top_incidents if _incident_coordinates(incident) is not None),
-            'hotspot': hotspot,
+    def list_item(incident: dict) -> dict:
+        return {
+            'description': incident['description'],
+            'severity': incident['severity'],
+            'source': incident['source'],
+            'location': _incident_location_label(incident),
+            'reported_at': _incident_reported_at(incident) or incident['first_seen'],
+            'units': incident['units'],
+            'distance_mi': round(incident['distance_m'] / 1609.344, 2),
+            'approximate': str(incident.get('geocode_quality') or '').startswith('approximate'),
+            'lat': round(incident['latitude'], 5),
+            'lon': round(incident['longitude'], 5),
         }
-        if hotspot:
-            top_incident_type['hotspot']['shareOfType'] = round(hotspot['incidentCount'] / top_count, 4) if top_count else 0.0
-
-    summary = None
-    if top_incident_type:
-        summary = (
-            f"{top_incident_type['description']} was the most common incident type "
-            f"with {top_incident_type['count']} incidents."
-        )
-        if hotspot:
-            anchor_label = hotspot['anchor'].get('label') or hotspot['anchor'].get('municipality') or 'the mapped area'
-            summary += (
-                f" The densest {radius_miles:g}-mile hotspot had "
-                f"{hotspot['incidentCount']} of them near {anchor_label}."
-            )
 
     return {
-        'month': month,
-        'source': source_filter,
+        'center': {'lat': lat, 'lon': lon},
         'radiusMiles': radius_miles,
-        'generatedAt': datetime.now(timezone.utc).isoformat(),
-        'isStatic': False,
-        'totalIncidents': len(included_incidents),
-        'rawIncidentCount': len(incidents),
-        'excludedIncidentCount': excluded_count,
-        'excludedDescriptions': sorted(excluded),
-        'topIncidentType': top_incident_type,
-        'topTypes': [
-            {
-                'description': description,
-                'count': count,
-                'shareOfMonth': round(count / len(included_incidents), 4) if included_incidents else 0.0,
-            }
-            for description, count in top_types[:10]
+        'days': days,
+        'total': len(matches),
+        'approximateCount': approximate,
+        'severity': severity_counts,
+        'sources': [
+            {'key': key, 'label': REPORT_SOURCE_LABELS.get(key, key), 'count': count}
+            for key, count in sorted(source_counts.items(), key=lambda item: -item[1])
         ],
-        'summary': summary,
+        'months': [{'month': key, 'count': month_counts[key]} for key in sorted(month_counts)],
+        'types': sorted(types.values(), key=lambda item: (-item['count'], item['description']))[:25],
+        # Compact map points: [lat, lon, severity index]
+        'points': [
+            [round(item['latitude'], 5), round(item['longitude'], 5), SEVERITY_ORDER.index(item['severity'])]
+            for item in matches[:REPORT_NEARBY_POINT_LIMIT]
+        ],
+        'pointsTruncated': len(matches) > REPORT_NEARBY_POINT_LIMIT,
+        'incidents': [list_item(item) for item in matches[:REPORT_NEARBY_LIST_LIMIT]],
     }
 
 
-REPORT_MAP_COLOR_ORDER = ['red', 'orange', 'blue', 'medical']
-REPORT_MAP_ADDRESS_FORMAT_MESSAGE = 'Use format: 1234 Market St, Shreveport, LA 71101.'
-REPORT_MAP_ADDRESS_RE = re.compile(
-    r"^\s*\d{1,6}[A-Za-z]?\s+[A-Za-z0-9 .#'/-]{2,},?\s+[A-Za-z .'-]{2,},?\s+(?:LA|Louisiana)\s+\d{5}(?:-\d{4})?\s*$",
-    re.IGNORECASE,
-)
-REPORT_MAP_EXACT_SCORE_LIMIT = int(_env_setting('LOUISIANA911_REPORT_EXACT_SCORE_LIMIT', 'CADDO911_REPORT_EXACT_SCORE_LIMIT', '12000'))
-REPORT_MAP_PERIOD_CACHE_TTL_SECONDS = int(_env_setting('LOUISIANA911_REPORT_PERIOD_CACHE_TTL_SECONDS', 'CADDO911_REPORT_PERIOD_CACHE_TTL_SECONDS', '120'))
-_report_geocode_cache: dict[tuple[str, str], dict | None] = {}
-_report_period_cache: dict[tuple[str, str, tuple[str, ...]], tuple[float, dict]] = {}
-_available_report_months_cache: dict[tuple[str, tuple[str, ...]], tuple[float, list[str]]] = {}
-
-REPORT_MAP_COLOR_META = {
-    'red': {
-        'label': 'Red',
-        'description': 'Violence, weapons, major fire, and urgent life-safety calls',
-        'color': '#ff3b3b',
-    },
-    'orange': {
-        'label': 'Orange',
-        'description': 'Property crime, suspicious activity, hazards, and crashes',
-        'color': '#ffb830',
-    },
-    'blue': {
-        'label': 'Blue',
-        'description': 'Lower-risk assistance, welfare, traffic, and service calls',
-        'color': '#3b8bff',
-    },
-    'medical': {
-        'label': 'Medical',
-        'description': 'EMS and medical-emergency calls',
-        'color': '#ff3b6b',
-    },
-}
-
-REPORT_MAP_COLOR_TERMS = {
-    'medical': [
-        'medical emergency', 'caddo ems event', 'ems', 'unconscious', 'not breathing',
-        'difficulty breathing', 'choking', 'overdose', 'cardiac', 'heart', 'stroke',
-        'seizure', 'prisoner medical security',
-    ],
-    'red': [
-        'shots fired', 'shooting', 'shot fired', 'gun', 'armed', 'weapon',
-        'stabbing', 'stab', 'knife', 'assault', 'battery', 'domestic', 'fight',
-        'robbery', 'home invasion', 'kidnap', 'hostage', 'homicide', 'murder',
-        'rape', 'sexual', 'missing person', 'structure fire', 'house fire',
-        'apartment fire', 'building fire', 'fire emergency', 'explosion',
-        'major accident', 'injury accident', 'accident with injuries', 'fatal',
-        'entrap', 'rollover',
-    ],
-    'orange': [
-        'theft', 'burglary', 'stolen', 'shoplift', 'vandal', 'fraud',
-        'accident', 'crash', 'wreck', 'collision', 'mvc', 'mva',
-        'hit and run', 'hit run', 'traffic hazard', 'road hazard', 'debris',
-        'disabled vehicle', 'gas leak', 'smoke', 'fire alarm', 'alarm',
-        'loose livestock', 'livestock', 'loose animal', 'animal in roadway',
-        'disturbance', 'dispute', 'disorderly', 'suspicious', 'prowler',
-        'trespass', 'harassment', 'juvenile complaint',
-    ],
-    'blue': [
-        'assist', 'assist motorist', 'deliver message', 'periodic check',
-        'taken by other agency', 'follow up', 'followup', 'follow',
-        'investigation', 'report', 'information', 'citizen assist',
-        'citizen assistance', 'civil', 'welfare concern', 'welfare check',
-        'wellness check', 'property check', 'extra patrol', 'directed patrol',
-        'noise', 'complaint', 'parking', 'traffic control', 'traffic stop',
-        'traffic violation', 'minor accident', 'minor traffic accident',
-        'minor hit', 'lost property', 'found property', 'public service',
-        'special event stand by', 'transport', 'caddo fire district',
-    ],
-}
-
-
-def _normalize_report_text(value: str | None) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", (value or "").lower())).strip()
-
-
-def _report_text_includes_any(text: str, terms: list[str]) -> bool:
-    return any(term in text for term in terms)
-
-
-def _incident_report_color(incident: dict) -> str:
-    """Map an incident onto the user-facing report colors."""
-    description = _normalize_report_text(incident.get('description'))
-    agency = str(incident.get('agency') or '').upper()
-
-    if agency == 'EMS' or 'EMS' in agency or _report_text_includes_any(description, REPORT_MAP_COLOR_TERMS['medical']):
-        return 'medical'
-    if _report_text_includes_any(description, REPORT_MAP_COLOR_TERMS['red']):
-        return 'red'
-    if _report_text_includes_any(description, REPORT_MAP_COLOR_TERMS['blue']):
-        return 'blue'
-    if _report_text_includes_any(description, REPORT_MAP_COLOR_TERMS['orange']):
-        return 'orange'
-    return 'orange'
-
-
-def _parse_report_colors(raw_value: str | None) -> list[str]:
-    colors: list[str] = []
-    for part in (raw_value or '').split(','):
-        color = part.strip().lower()
-        if color in REPORT_MAP_COLOR_META and color not in colors:
-            colors.append(color)
-    return colors
-
-
-def _normalize_report_map_month(value: str | None) -> str | None:
-    month = (value or 'all').strip().lower()
-    if month in ('', 'all', '12mo', 'last12'):
-        return 'all'
-    if month in ('this_year', 'year', 'current_year'):
-        return 'this_year'
-    if len(month) == 7 and _central_month_bounds_utc(month) is not None:
-        return month
-    return None
-
-
-def _report_period_months(month: str, source_filter: str, excluded_descriptions: set[str]) -> list[str]:
-    available_months = _available_report_months(source_filter, excluded_descriptions=excluded_descriptions)
-    if month == 'all':
-        return available_months
-    if month == 'this_year':
-        year_prefix = f"{datetime.now(CENTRAL_TZ).year:04d}-"
-        return [month_key for month_key in available_months if month_key.startswith(year_prefix)]
-    return [month] if month in available_months else []
-
-
-def _load_report_period_incidents(
-    month: str,
-    source_filter: str,
-    *,
-    excluded_descriptions: set[str] | None = None,
-) -> list[dict]:
-    excluded = excluded_descriptions or set()
-    months = _report_period_months(month, source_filter, excluded)
-
-    incidents_by_hash: dict[str, dict] = {}
-    for month_key in months:
-        for incident in _load_month_incidents(month_key, source_filter):
-            description = _clean_ws(incident.get('description') or '')
-            if description.upper() in excluded:
-                continue
-            key = str(incident.get('hash') or f"{month_key}:{incident.get('source')}:{incident.get('id')}")
-            if key not in incidents_by_hash:
-                incidents_by_hash[key] = incident
-
-    incidents = list(incidents_by_hash.values())
-    incidents.sort(key=lambda row: row.get('first_seen') or '')
-    return incidents
-
-
-def _load_report_period_dataset(
-    month: str,
-    source_filter: str,
-    *,
-    excluded_descriptions: set[str] | None = None,
-) -> dict:
-    excluded = excluded_descriptions or set()
-    cache_key = (month, source_filter, tuple(sorted(excluded)))
-    now = time.monotonic()
-    cached = _report_period_cache.get(cache_key)
-    if cached and now - cached[0] <= REPORT_MAP_PERIOD_CACHE_TTL_SECONDS:
-        return cached[1]
-
-    incidents = _load_report_period_incidents(
-        month,
-        source_filter,
-        excluded_descriptions=excluded,
-    )
-    mappable = [
-        decorated for incident in incidents
-        if (decorated := _decorate_report_map_incident(incident)) is not None
-    ]
-
-    color_counts = {color: 0 for color in REPORT_MAP_COLOR_ORDER}
-    for incident in mappable:
-        color = incident.get('_reportColor') or _incident_report_color(incident)
-        if color in color_counts:
-            color_counts[color] += 1
-
-    dataset = {
-        'incidents': incidents,
-        'mappable': mappable,
-        'colorCounts': color_counts,
-        'createdAt': datetime.now(timezone.utc).isoformat(),
-    }
-    _report_period_cache[cache_key] = (now, dataset)
-    if len(_report_period_cache) > 18:
-        oldest_key = min(_report_period_cache, key=lambda key: _report_period_cache[key][0])
-        _report_period_cache.pop(oldest_key, None)
-    return dataset
-
-
-def _report_period_label(month: str) -> str:
-    if month == 'all':
-        return 'All Data'
-    if month == 'this_year':
-        return f"This Year ({datetime.now(CENTRAL_TZ).year})"
-    try:
-        year_s, month_s = month.split('-')
-        dt = datetime(int(year_s), int(month_s), 1)
-        return dt.strftime('%B %Y')
-    except Exception:
-        return month
-
-
-def _validate_report_address(address: str) -> str | None:
-    address = _clean_ws(address)
-    if not address:
-        return 'Address is required. ' + REPORT_MAP_ADDRESS_FORMAT_MESSAGE
-    if len(address) > 140:
-        return 'Address is too long. ' + REPORT_MAP_ADDRESS_FORMAT_MESSAGE
-    if not REPORT_MAP_ADDRESS_RE.match(address):
-        return 'Invalid address. ' + REPORT_MAP_ADDRESS_FORMAT_MESSAGE
-    return None
-
-
-def _source_area_sq_miles(source_filter: str) -> float:
-    if source_filter == 'all':
-        return sum(float(profile.get('area_sq_miles') or 0) for profile in SOURCE_GEO_PROFILES.values())
-    profile = SOURCE_GEO_PROFILES.get(source_filter) or SOURCE_GEO_PROFILES['caddo']
-    return float(profile.get('area_sq_miles') or SOURCE_GEO_PROFILES['caddo']['area_sq_miles'])
-
-
-def _point_in_report_source_scope(lat: float, lon: float, source_filter: str) -> bool:
-    if source_filter == 'all':
-        return any(_is_in_source_bounds(lat, lon, source_name) for source_name in SOURCE_GEO_PROFILES)
-    return _is_in_source_bounds(lat, lon, source_filter)
-
-
-def _geocode_report_address(address: str, source_filter: str) -> dict | None:
-    address = _clean_ws(address)
-    if _validate_report_address(address):
-        return None
-
-    cache_key = (source_filter, address.lower())
-    if cache_key in _report_geocode_cache:
-        return _report_geocode_cache[cache_key]
+def _geocode_report_query(query: str) -> list[dict]:
+    """Resolve a typed place to points inside Louisiana911 coverage."""
+    key = query.lower()
+    if key in _report_geocode_cache:
+        return _report_geocode_cache[key]
     if len(_report_geocode_cache) > 512:
         _report_geocode_cache.pop(next(iter(_report_geocode_cache)), None)
 
-    source_names = list(SOURCE_GEO_PROFILES.keys()) if source_filter == 'all' else [source_filter]
-    queries: list[str] = []
-    for source_name in source_names:
-        profile = SOURCE_GEO_PROFILES.get(source_name) or SOURCE_GEO_PROFILES['caddo']
-        default_city = _clean_ws(profile.get('default_city') or '')
-        for query in (
-            address,
-            f"{address}, {default_city}, LA" if default_city else '',
-        ):
-            query = _clean_ws(query)
-            if query and query.lower() not in {q.lower() for q in queries}:
-                queries.append(query)
-
-    best_out_of_scope: dict | None = None
-    for query in queries[:4]:
-        try:
-            location = geolocator_arcgis.geocode(query, timeout=5)
-        except Exception:
-            location = None
-        provider = 'arcgis'
-        if not location:
-            try:
-                location = geolocator_osm.geocode(query, country_codes='us', exactly_one=True, timeout=5)
-                provider = 'osm'
-            except Exception:
-                continue
-        if not location:
+    search = query if re.search(r'\b(la|louisiana)\b', query, re.IGNORECASE) else f"{query}, Louisiana"
+    results: list[dict] = []
+    try:
+        locations = geolocator_arcgis.geocode(search, exactly_one=False, timeout=5) or []
+    except Exception as e:
+        log(f"[REPORTS] Geocode failed for {query!r}: {e}")
+        locations = []
+    for location in locations[:8]:
+        lat, lon = float(location.latitude), float(location.longitude)
+        if not _in_report_coverage(lat, lon):
             continue
-
-        lat = float(location.latitude)
-        lon = float(location.longitude)
-        result = {
-            'latitude': round(lat, 6),
-            'longitude': round(lon, 6),
-            'label': getattr(location, 'address', None) or query,
-            'query': query,
-            'geocodeSource': provider,
-            'inSourceBounds': _point_in_report_source_scope(lat, lon, source_filter),
-        }
-        if result['inSourceBounds']:
-            _report_geocode_cache[cache_key] = result
-            return result
-        if best_out_of_scope is None:
-            best_out_of_scope = result
-
-    _report_geocode_cache[cache_key] = best_out_of_scope
-    return best_out_of_scope
-
-
-def _decorate_report_map_incident(incident: dict) -> dict | None:
-    coords = _incident_coordinates(incident)
-    if coords is None:
-        return None
-    if _is_unknown_location(incident.get('street'), incident.get('cross_streets')):
-        return None
-
-    lat, lon = coords
-    color = _incident_report_color(incident)
-    row = dict(incident)
-    row['_reportColor'] = color
-    row['_reportColorLabel'] = REPORT_MAP_COLOR_META[color]['label']
-    row['_lat'] = lat
-    row['_lon'] = lon
-    return row
-
-
-def _report_incident_type_counts(incidents: list[dict], colors: list[str]) -> list[dict]:
-    color_set = set(colors)
-    counts: dict[str, dict] = {}
-    for incident in incidents:
-        color = incident.get('_reportColor') or _incident_report_color(incident)
-        if color not in color_set:
-            continue
-        description = _clean_ws(incident.get('description') or '')
-        if not description:
-            continue
-        bucket = counts.setdefault(description, {'description': description, 'count': 0, 'color': color})
-        bucket['count'] += 1
-    return sorted(counts.values(), key=lambda row: (-row['count'], row['description']))
-
-
-def _incident_matches_report_filters(incident: dict, colors: list[str], incident_type: str | None) -> bool:
-    if (incident.get('_reportColor') or _incident_report_color(incident)) not in set(colors):
-        return False
-    if incident_type:
-        return _clean_ws(incident.get('description') or '').upper() == incident_type.upper()
-    return True
-
-
-def _distance_miles_to_incident(target_lat: float, target_lon: float, incident: dict) -> float:
-    return _haversine_m(target_lat, target_lon, float(incident['_lat']), float(incident['_lon'])) / 1609.344
-
-
-def _sample_anchor_points(incidents: list[dict], *, limit: int | None = None) -> tuple[list[dict], bool]:
-    effective_limit = max(1, int(limit if limit is not None else REPORT_MAP_EXACT_SCORE_LIMIT))
-    if len(incidents) <= effective_limit:
-        return incidents, False
-    if effective_limit <= 1:
-        return incidents[:1], True
-    # Extreme data sizes are geographically sampled. Normal selected-color
-    # periods use every selected incident as a peer anchor.
-    geo_sorted = sorted(
-        incidents,
-        key=lambda incident: (
-            round(float(incident['_lat']), 3),
-            round(float(incident['_lon']), 3),
-            str(incident.get('first_seen') or ''),
-        ),
-    )
-    step = (len(geo_sorted) - 1) / (effective_limit - 1)
-    return [geo_sorted[int(round(idx * step))] for idx in range(effective_limit)], True
-
-
-def _report_metric_empty(label: str, count: int, total: int, expected_by_area: float, ratio_to_area: float | None) -> dict:
-    ratio_to_peer = None if count == 0 else float(count)
-    percentile = None
-    return {
-        'label': label,
-        'count': count,
-        'totalInPeriod': total,
-        'expectedByArea': round(expected_by_area, 2),
-        'peerAverage': 0.0,
-        'aboveAveragePoints': float(count),
-        'ratioToArea': round(ratio_to_area, 2) if ratio_to_area is not None else None,
-        'ratioToPeer': ratio_to_peer,
-        'percentile': percentile,
-        'peerSampleSize': 0,
-        'peerPopulationSize': 0,
-        'peerSampled': False,
-        'score': _map_score_value(count, ratio_to_peer, percentile),
-        'verdict': _map_score_label(count, ratio_to_peer, percentile),
-    }
-
-
-def _report_spatial_cell_size(radius_miles: float) -> float:
-    # Roughly half the radius in latitude degrees, bounded so tiny radii still
-    # keep cell counts low and larger custom radii do not create huge neighbor scans.
-    return max(0.003, min(0.03, float(radius_miles) / 138.0))
-
-
-def _build_report_spatial_index(incidents: list[dict], cell_size: float) -> dict[tuple[int, int], list[dict]]:
-    index: dict[tuple[int, int], list[dict]] = {}
-    for incident in incidents:
-        cell = (
-            math.floor(float(incident['_lat']) / cell_size),
-            math.floor(float(incident['_lon']) / cell_size),
-        )
-        index.setdefault(cell, []).append(incident)
-    return index
-
-
-def _candidate_incidents_near(
-    lat: float,
-    lon: float,
-    incidents: list[dict],
-    radius_m: float,
-    *,
-    spatial_index: dict[tuple[int, int], list[dict]] | None = None,
-    cell_size: float | None = None,
-) -> list[dict]:
-    if spatial_index is None or not cell_size:
-        return incidents
-
-    radius_miles = radius_m / 1609.344
-    lat_range = max(1, math.ceil((radius_miles / 69.0) / cell_size) + 1)
-    cos_lat = max(0.2, abs(math.cos(math.radians(lat))))
-    lon_range = max(1, math.ceil((radius_miles / (69.0 * cos_lat)) / cell_size) + 1)
-    base_lat_cell = math.floor(lat / cell_size)
-    base_lon_cell = math.floor(lon / cell_size)
-    nearby: list[dict] = []
-    for lat_cell in range(base_lat_cell - lat_range, base_lat_cell + lat_range + 1):
-        for lon_cell in range(base_lon_cell - lon_range, base_lon_cell + lon_range + 1):
-            nearby.extend(spatial_index.get((lat_cell, lon_cell), []))
-    return nearby
-
-
-def _count_incidents_near(
-    lat: float,
-    lon: float,
-    incidents: list[dict],
-    radius_m: float,
-    *,
-    spatial_index: dict[tuple[int, int], list[dict]] | None = None,
-    cell_size: float | None = None,
-) -> int:
-    candidates = _candidate_incidents_near(
-        lat,
-        lon,
-        incidents,
-        radius_m,
-        spatial_index=spatial_index,
-        cell_size=cell_size,
-    )
-
-    count = 0
-    for incident in candidates:
-        if _haversine_m(lat, lon, float(incident['_lat']), float(incident['_lon'])) <= radius_m:
-            count += 1
-    return count
-
-
-def _map_score_label(count: int, ratio_to_peer: float | None, percentile: float | None) -> str:
-    ratio = ratio_to_peer if ratio_to_peer is not None else 0.0
-    pct = percentile if percentile is not None else 0.0
-    if count <= 0:
-        return 'No mapped cases'
-    if ratio >= 2.0 or pct >= 0.9:
-        return 'Well above average'
-    if ratio >= 1.25 or pct >= 0.75:
-        return 'Above average'
-    if ratio <= 0.65 and pct <= 0.35:
-        return 'Below average'
-    return 'Near average'
-
-
-def _map_score_value(count: int, ratio_to_peer: float | None, percentile: float | None) -> int:
-    if count <= 0:
-        return 0
-    ratio = max(float(ratio_to_peer or 1.0), 0.05)
-    pct = float(percentile if percentile is not None else 0.5)
-    score = 50 + (22 * math.log(ratio, 2)) + (18 * (pct - 0.5))
-    return max(0, min(100, int(round(score))))
-
-
-def _build_report_map_metric(
-    label: str,
-    period_incidents: list[dict],
-    target_incidents: list[dict],
-    anchor_incidents: list[dict],
-    *,
-    radius_miles: float,
-    source_area_sq_miles: float,
-) -> dict:
-    radius_m = radius_miles * 1609.344
-    circle_area = math.pi * (radius_miles ** 2)
-    total = len(period_incidents)
-    count = len(target_incidents)
-    expected_by_area = total * min(circle_area / max(source_area_sq_miles, 1.0), 1.0)
-    ratio_to_area = (count / expected_by_area) if expected_by_area > 0 else None
-
-    sampled_anchors, peer_sampled = _sample_anchor_points(anchor_incidents)
-    if not sampled_anchors:
-        return _report_metric_empty(label, count, total, expected_by_area, ratio_to_area)
-
-    cell_size = _report_spatial_cell_size(radius_miles)
-    spatial_index = _build_report_spatial_index(period_incidents, cell_size)
-    peer_counts = [
-        _count_incidents_near(
-            float(anchor['_lat']),
-            float(anchor['_lon']),
-            period_incidents,
-            radius_m,
-            spatial_index=spatial_index,
-            cell_size=cell_size,
-        )
-        for anchor in sampled_anchors
-    ]
-    peer_average = (sum(peer_counts) / len(peer_counts)) if peer_counts else 0.0
-    ratio_to_peer = (count / peer_average) if peer_average > 0 else (None if count == 0 else count)
-    percentile = None
-    if peer_counts:
-        percentile = sum(1 for peer_count in peer_counts if peer_count <= count) / len(peer_counts)
-
-    score = _map_score_value(count, ratio_to_peer, percentile)
-    verdict = _map_score_label(count, ratio_to_peer, percentile)
-    above_average_points = count - peer_average
-
-    return {
-        'label': label,
-        'count': count,
-        'totalInPeriod': total,
-        'expectedByArea': round(expected_by_area, 2),
-        'peerAverage': round(peer_average, 2),
-        'aboveAveragePoints': round(above_average_points, 2),
-        'ratioToArea': round(ratio_to_area, 2) if ratio_to_area is not None else None,
-        'ratioToPeer': round(ratio_to_peer, 2) if ratio_to_peer is not None else None,
-        'percentile': round(percentile, 4) if percentile is not None else None,
-        'peerSampleSize': len(sampled_anchors),
-        'peerPopulationSize': len(anchor_incidents),
-        'peerSampled': peer_sampled,
-        'score': score,
-        'verdict': verdict,
-    }
-
-
-def _serialize_map_report_incident(incident: dict) -> dict:
-    return {
-        'id': incident.get('id'),
-        'description': incident.get('description'),
-        'agency': incident.get('agency'),
-        'time': incident.get('time'),
-        'street': incident.get('street'),
-        'crossStreets': incident.get('cross_streets'),
-        'municipality': incident.get('municipality'),
-        'source': incident.get('source'),
-        'firstSeen': incident.get('first_seen'),
-        'latitude': round(float(incident['_lat']), 6),
-        'longitude': round(float(incident['_lon']), 6),
-        'distanceMiles': round(float(incident.get('_distanceMiles') or 0), 2),
-        'color': incident.get('_reportColor'),
-        'colorLabel': incident.get('_reportColorLabel'),
-        'locationLabel': _incident_location_label(incident),
-    }
+        results.append({'label': location.address, 'lat': round(lat, 6), 'lon': round(lon, 6)})
+        if len(results) >= 5:
+            break
+    _report_geocode_cache[key] = results
+    return results
 
 
 # API Routes
@@ -4157,7 +3543,12 @@ def new_orleans_coverage_redirect():
 
 @app.route('/reports/')
 def reports():
-    return send_from_directory('public', 'reports.html')
+    with open(os.path.join(app.root_path, 'public', 'reports.html'), encoding='utf-8') as page:
+        html = page.read()
+    config = json.dumps({'cartoKey': _carto_basemap_key()}, ensure_ascii=True).replace('<', '\\u003c')
+    html = html.replace('<script type="application/json" id="map-config">{}</script>',
+                        f'<script type="application/json" id="map-config">{config}</script>', 1)
+    return app.response_class(html, mimetype='text/html')
 
 @app.route('/reports')
 def reports_redirect():
@@ -4165,13 +3556,9 @@ def reports_redirect():
 
 
 @app.route('/reports/monthly/')
-def monthly_reports():
-    return send_from_directory('public', 'monthly-reports.html')
-
-
 @app.route('/reports/monthly')
 def monthly_reports_redirect():
-    return redirect('/reports/monthly/', code=301)
+    return redirect('/reports/', code=301)
 
 @app.route('/healthz')
 def healthz():
@@ -4429,243 +3816,54 @@ def get_history_counts():
 
     return jsonify({'counts': counts})
 
-@app.route('/api/reports/monthly')
-def get_monthly_report():
-    month = (request.args.get('month') or datetime.now(CENTRAL_TZ).strftime('%Y-%m')).strip()
-    source_filter = _normalize_source_filter(request.args.get('source'))
-    radius_miles = request.args.get('radius_miles', default=3.0, type=float)
-
+@app.route('/api/reports/summary')
+def get_report_summary():
+    months = _report_available_months()
+    month = (request.args.get('month') or (months[0] if months else '')).strip()
     if len(month) != 7 or _central_month_bounds_utc(month) is None:
         return jsonify({'error': 'month must be in YYYY-MM format'}), 400
+    if month not in months:
+        return jsonify({'error': 'No records for that month.', 'months': months}), 404
 
-    if radius_miles is None or not math.isfinite(radius_miles) or radius_miles <= 0 or radius_miles > 50:
-        return jsonify({'error': 'radius_miles must be a number between 0 and 50'}), 400
+    current_month = datetime.now(CENTRAL_TZ).strftime('%Y-%m')
+    # Finished months never change; the current month refreshes every few minutes.
+    ttl = REPORT_CACHE_TTL_SECONDS if month >= _previous_month(current_month) else None
+    summary = _report_cache_get(('summary', month), ttl)
+    if summary is None:
+        summary = _build_parish_summary(month)
+        _report_cache_put(('summary', month), summary)
+    return jsonify({**summary, 'months': months, 'isCurrentMonth': month == current_month})
 
-    excluded = _normalize_report_excluded_descriptions()
-    available_months = _available_report_months(source_filter, excluded_descriptions=excluded)
-    if month not in available_months:
-        return jsonify({'error': 'no report data available for that month and source'}), 404
 
-    if _is_past_month(month):
-        cached = _load_cached_monthly_report(month, source_filter, radius_miles)
-        if cached:
-            return jsonify(cached)
+@app.route('/api/reports/nearby')
+def get_nearby_report():
+    lat = _parse_report_float('lat')
+    lon = _parse_report_float('lon')
+    radius = _parse_report_float('radius')
+    days = request.args.get('days', default=90, type=int)
+    if lat is None or lon is None or not _in_report_coverage(lat, lon):
+        return jsonify({'error': 'Pick a point inside an area Louisiana911 covers.'}), 400
+    if radius not in REPORT_NEARBY_RADII:
+        return jsonify({'error': 'radius must be one of ' + ', '.join(f'{r:g}' for r in REPORT_NEARBY_RADII)}), 400
+    if days not in REPORT_NEARBY_DAYS:
+        return jsonify({'error': 'days must be 30, 90, 365, or 0 for all records'}), 400
 
-    report = _build_monthly_report(
-        month,
-        source_filter,
-        radius_miles,
-        excluded_descriptions=excluded,
-    )
-    report['cacheVersion'] = REPORT_CACHE_VERSION
-    if _is_past_month(month):
-        _save_cached_monthly_report(report)
-        report['isStatic'] = True
-
+    lat, lon = round(lat, 5), round(lon, 5)
+    key = ('nearby', lat, lon, radius, days)
+    report = _report_cache_get(key, REPORT_CACHE_TTL_SECONDS)
+    if report is None:
+        report = _build_nearby_report(lat, lon, radius, days)
+        _report_cache_put(key, report)
     return jsonify(report)
 
 
-@app.route('/api/reports/available_months')
-def get_available_report_months():
-    source_filter = _normalize_source_filter(request.args.get('source'))
-    excluded = _normalize_report_excluded_descriptions()
-    months = _available_report_months(source_filter, excluded_descriptions=excluded)
-    return jsonify({
-        'source': source_filter,
-        'months': months,
-        'latest': months[0] if months else None,
-        'excludedDescriptions': sorted(excluded),
-    })
+@app.route('/api/reports/geocode')
+def get_report_geocode():
+    query = _clean_ws(request.args.get('q') or '')
+    if not 3 <= len(query) <= 140 or not re.fullmatch(r"[\w .,#&@'/-]+", query):
+        return jsonify({'error': 'Enter an address, intersection, or place name.'}), 400
+    return jsonify({'results': _geocode_report_query(query)})
 
-
-def get_map_report_options():
-    source_filter = _normalize_source_filter(request.args.get('source'))
-    month = _normalize_report_map_month(request.args.get('month'))
-    if month is None:
-        return jsonify({'error': 'month must be all, this_year, or YYYY-MM'}), 400
-
-    colors = _parse_report_colors(request.args.get('colors'))
-    if not colors:
-        colors = list(REPORT_MAP_COLOR_ORDER)
-    excluded = _normalize_report_excluded_descriptions()
-    months = _available_report_months(source_filter, excluded_descriptions=excluded)
-    dataset = _load_report_period_dataset(
-        month,
-        source_filter,
-        excluded_descriptions=excluded,
-    )
-    incidents = dataset['incidents']
-    decorated = dataset['mappable']
-    color_counts = dataset['colorCounts']
-
-    return jsonify({
-        'source': source_filter,
-        'month': month,
-        'periodLabel': _report_period_label(month),
-        'months': months,
-        'latest': months[0] if months else None,
-        'colors': [
-            {
-                'key': color,
-                **REPORT_MAP_COLOR_META[color],
-                'count': color_counts.get(color, 0),
-            }
-            for color in REPORT_MAP_COLOR_ORDER
-        ],
-        'incidentTypes': _report_incident_type_counts(decorated, colors)[:250],
-        'totalIncidents': len(incidents),
-        'mappableIncidents': len(decorated),
-        'excludedDescriptions': sorted(excluded),
-    })
-
-
-def get_map_report():
-    report_started_at = time.perf_counter()
-    source_filter = _normalize_source_filter(request.args.get('source'))
-    month = _normalize_report_map_month(request.args.get('month'))
-    if month is None:
-        return jsonify({'error': 'month must be all, this_year, or YYYY-MM'}), 400
-
-    radius_miles = request.args.get('radius_miles', default=2.0, type=float)
-    if radius_miles is None or not math.isfinite(radius_miles) or radius_miles < 0.25 or radius_miles > 25:
-        return jsonify({'error': 'radius_miles must be a number between 0.25 and 25'}), 400
-
-    colors = _parse_report_colors(request.args.get('colors'))
-    if not colors:
-        return jsonify({'error': 'Select at least one report color before running the map report.'}), 400
-    incident_type_raw = _clean_ws(request.args.get('incident_type') or '')
-    incident_type = incident_type_raw if incident_type_raw and incident_type_raw.lower() != 'all' else None
-
-    target_lat = request.args.get('lat', type=float)
-    target_lon = request.args.get('lng', type=float)
-    address = _clean_ws(request.args.get('address') or '')
-    target = None
-    if target_lat is not None and target_lon is not None and math.isfinite(target_lat) and math.isfinite(target_lon):
-        target = {
-            'latitude': round(float(target_lat), 6),
-            'longitude': round(float(target_lon), 6),
-            'label': address or 'Selected point',
-            'query': None,
-            'geocodeSource': 'coordinates',
-            'inSourceBounds': _point_in_report_source_scope(float(target_lat), float(target_lon), source_filter),
-        }
-    elif address:
-        address_error = _validate_report_address(address)
-        if address_error:
-            return jsonify({'error': address_error}), 400
-        target = _geocode_report_address(address, source_filter)
-    else:
-        return jsonify({'error': 'Address is required. ' + REPORT_MAP_ADDRESS_FORMAT_MESSAGE}), 400
-
-    if not target:
-        return jsonify({'error': 'Address could not be verified. ' + REPORT_MAP_ADDRESS_FORMAT_MESSAGE}), 404
-    if not target.get('inSourceBounds'):
-        return jsonify({'error': 'Address is outside the selected source area. Check Source or enter a local Louisiana address.'}), 400
-
-    target_lat = float(target['latitude'])
-    target_lon = float(target['longitude'])
-    radius_m = radius_miles * 1609.344
-    excluded = _normalize_report_excluded_descriptions()
-    dataset = _load_report_period_dataset(
-        month,
-        source_filter,
-        excluded_descriptions=excluded,
-    )
-    incidents = dataset['incidents']
-    mappable = [dict(incident) for incident in dataset['mappable']]
-
-    cell_size = _report_spatial_cell_size(radius_miles)
-    spatial_index = _build_report_spatial_index(mappable, cell_size)
-    radius_candidates = _candidate_incidents_near(
-        target_lat,
-        target_lon,
-        mappable,
-        radius_m,
-        spatial_index=spatial_index,
-        cell_size=cell_size,
-    )
-    for incident in radius_candidates:
-        incident['_distanceMiles'] = _distance_miles_to_incident(target_lat, target_lon, incident)
-
-    in_radius = [
-        incident for incident in radius_candidates
-        if float(incident.get('_distanceMiles') or 0) * 1609.344 <= radius_m
-    ]
-    selected_period = [
-        incident for incident in mappable
-        if _incident_matches_report_filters(incident, colors, incident_type)
-    ]
-    selected_in_radius = [
-        incident for incident in in_radius
-        if _incident_matches_report_filters(incident, colors, incident_type)
-    ]
-
-    source_area = _source_area_sq_miles(source_filter)
-    overall_metric = _build_report_map_metric(
-        incident_type or 'Selected colors',
-        selected_period,
-        selected_in_radius,
-        selected_period,
-        radius_miles=radius_miles,
-        source_area_sq_miles=source_area,
-    )
-
-    color_metrics = []
-    for color in REPORT_MAP_COLOR_ORDER:
-        period_rows = [incident for incident in mappable if incident.get('_reportColor') == color]
-        radius_rows = [incident for incident in in_radius if incident.get('_reportColor') == color]
-        metric = _build_report_map_metric(
-            REPORT_MAP_COLOR_META[color]['label'],
-            period_rows,
-            radius_rows,
-            period_rows,
-            radius_miles=radius_miles,
-            source_area_sq_miles=source_area,
-        )
-        color_metrics.append({
-            'key': color,
-            **REPORT_MAP_COLOR_META[color],
-            'enabled': color in set(colors),
-            **metric,
-        })
-
-    top_types = _report_incident_type_counts(selected_in_radius, REPORT_MAP_COLOR_ORDER)[:12]
-    selected_in_radius.sort(key=lambda incident: (float(incident.get('_distanceMiles') or 0), incident.get('first_seen') or ''))
-
-    summary = (
-        f"{overall_metric['count']} matching incident"
-        f"{'' if overall_metric['count'] == 1 else 's'} found within {radius_miles:g} miles. "
-        f"That is {overall_metric['verdict'].lower()} for {_report_period_label(month)}."
-    )
-
-    return jsonify({
-        'address': address,
-        'target': target,
-        'source': source_filter,
-        'month': month,
-        'periodLabel': _report_period_label(month),
-        'radiusMiles': radius_miles,
-        'colors': colors,
-        'incidentType': incident_type,
-        'totalIncidents': len(incidents),
-        'mappableIncidents': len(mappable),
-        'incidentsInRadius': len(in_radius),
-        'matchingIncidentsInRadius': len(selected_in_radius),
-        'sourceAreaSqMiles': round(source_area, 2),
-        'score': overall_metric,
-        'summary': summary,
-        'colorMetrics': color_metrics,
-        'topIncidentTypes': top_types,
-        'incidents': [_serialize_map_report_incident(incident) for incident in selected_in_radius[:200]],
-        'processing': {
-            'elapsedMs': int(round((time.perf_counter() - report_started_at) * 1000)),
-            'periodCacheSeconds': REPORT_MAP_PERIOD_CACHE_TTL_SECONDS,
-            'peerSampleLimit': REPORT_MAP_EXACT_SCORE_LIMIT,
-            'radiusCandidateCount': len(radius_candidates),
-            'returnedIncidentLimit': 200,
-        },
-        'excludedDescriptions': sorted(excluded),
-    })
 
 @app.route('/api/stats')
 def get_stats():

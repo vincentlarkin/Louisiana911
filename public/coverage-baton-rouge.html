@@ -58,36 +58,24 @@
     <header class="top"><a class="brand" href="/"><span class="mark" aria-hidden="true">LA911</span><span>Louisiana911</span></a><a class="map-link" href="/?source=batonrouge">Open Baton Rouge map</a></header>
     <nav class="crumb" aria-label="Breadcrumb"><a href="/">Louisiana911</a> / <a href="/coverage/">Coverage</a> / Baton Rouge</nav>
     <main id="content">
-      <section class="hero">
-        <p class="kicker">Baton Rouge and East Baton Rouge Parish</p>
-        <h1>Baton Rouge traffic incidents, mapped honestly.</h1>
-        <p class="lede">Louisiana911 shows the current traffic-incident list published by the City of Baton Rouge and Parish of East Baton Rouge. This is a traffic feed—not a complete list of Baton Rouge 911 calls or reported crime.</p>
-        <div class="facts" role="group" aria-label="Coverage summary">
-          <div class="fact"><strong>Source</strong><span>City-Parish public traffic systems</span></div>
-          <div class="fact"><strong>Timing</strong><span>Current published incidents</span></div>
-          <div class="fact"><strong>Location</strong><span>Approximate by source contract</span></div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>What appears on Louisiana911</h2>
-        <p>The readable City-Parish incident list supplies the reported time, incident type, agency label, street or address, and cross street. The companion EBRGIS traffic layer can supply an official approximate map point for the same incident.</p>
+      <section>
+        <h2>About the Baton Rouge feed</h2>
+        <p>The City of Baton Rouge and Parish of East Baton Rouge publish a list of current traffic incidents. Louisiana911 shows that list on the map. It is a traffic feed, so it does not include most 911 calls or reported crimes.</p>
         <ul class="list">
-          <li>Traffic crashes, hit-and-runs, disabled vehicles, road blockages, and other traffic incidents when published upstream.</li>
-          <li>Agency labels such as LAW or OSS exactly as the public feed supplies them.</li>
-          <li>Current incidents only; disappearance from the live source does not prove a particular outcome.</li>
+          <li><strong>Source:</strong> City-Parish traffic incident list and EBRGIS traffic map layer</li>
+          <li><strong>Timing:</strong> Current incidents as published</li>
+          <li><strong>Includes:</strong> crashes, hit-and-runs, stalled vehicles, road blockages, and other traffic incidents</li>
         </ul>
+        <p>Agency labels such as LAW or OSS appear exactly as the feed lists them.</p>
 
-        <h3>How map locations are chosen</h3>
-        <p>Louisiana911 first uses the City-Parish map layer's published point. Every point in that layer is treated as approximate. If a newly listed incident has not reached the map layer yet, the site may use a validated address-range or cross-street corridor result. An unverified guess is left unmapped.</p>
+        <h3>Map locations</h3>
+        <p>Markers use the point from the City-Parish traffic map layer when it has one. Those points are approximate. If an incident hasn't reached the map layer yet, Louisiana911 may place it using a checked address range or cross street. Otherwise it stays in the list as "Map location unavailable" until the layer catches up.</p>
 
-        <h3>Why an incident can say “Map unavailable”</h3>
-        <p>The incident list and map layer do not always update at the same moment. A normal street label is not automatically accepted as a precise point: Louisiana911 checks provider metadata and local East Baton Rouge bounds before showing a fallback marker.</p>
+        <h3>Limits</h3>
+        <p>This is not a crime map, police blotter, or 911 call log. An incident leaving the list doesn't tell you how it ended.</p>
 
-        <div class="actions"><a class="button primary" href="/?source=batonrouge">View Baton Rouge incidents</a><a class="button source" href="https://city.brla.gov/traffic/incidents.asp" rel="noopener noreferrer">Open official City-Parish feed</a></div>
+        <div class="actions"><a class="button primary" href="/?source=batonrouge">View Baton Rouge incidents</a><a class="button source" href="https://city.brla.gov/traffic/incidents.asp" rel="noopener noreferrer">Official City-Parish feed</a></div>
       </section>
-
-      <p class="notice"><strong>Important:</strong> This page describes a public traffic-incident source. It must not be interpreted as a complete Baton Rouge crime map, police blotter, or 911 call log.</p>
       <nav class="related" aria-label="Related coverage">Other coverage: <a href="/caddo911/">Caddo Parish</a> · <a href="/coverage/lafayette/">Lafayette Parish</a> · <a href="/coverage/new-orleans/">New Orleans</a></nav>
     </main>
     <footer><span>Independent, citizen-run, and unofficial. For emergencies, call 911.</span><a href="/about/">Full methodology</a></footer>

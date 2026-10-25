@@ -1,0 +1,68 @@
+/* Shared look for the text pages (About, Coverage). Tokens match styles.css. */
+:root {
+  color-scheme: dark;
+  --bg: #08090d;
+  --panel: #101117;
+  --card: #171922;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text: #f1f2f5;
+  --dim: #a2a7b4;
+  --link: #77aaff;
+  --red: #ff3b3b;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  color: var(--text);
+  background: var(--bg);
+  font: 16px/1.6 'Space Grotesk', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--link); text-underline-offset: 3px; }
+a:focus-visible { outline: 2px solid rgba(59, 139, 255, 0.9); outline-offset: 2px; }
+.skip { position: absolute; left: -9999px; }
+.skip:focus { left: 12px; top: 12px; z-index: 2; padding: 8px 12px; background: var(--text); color: var(--bg); }
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(12, 13, 18, 0.98);
+}
+.brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-weight: 700; font-size: 18px; }
+.brand img { width: 36px; height: 36px; border-radius: 9px; border: 1px solid var(--border-strong); }
+.top-link {
+  display: inline-flex; align-items: center; height: 36px; padding: 0 12px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--card);
+  color: var(--dim); font-size: 13px; font-weight: 600; text-decoration: none;
+}
+.top-link:hover { color: var(--text); border-color: var(--border-strong); }
+
+main { width: min(820px, 100%); margin: 0 auto; padding: 24px 16px 40px; }
+.crumb { margin: 0 0 8px; color: var(--dim); font-size: 14px; }
+h1 { margin: 0; font-size: 30px; line-height: 1.15; }
+h2 { margin: 32px 0 8px; font-size: 21px; line-height: 1.25; }
+h3 { margin: 0 0 4px; font-size: 17px; }
+.lede { margin: 8px 0 0; color: var(--dim); font-size: 17px; }
+p { margin: 8px 0; }
+ul { margin: 8px 0; padding-left: 22px; }
+li + li { margin-top: 4px; }
+.dim { color: var(--dim); }
+
+.notice { margin: 20px 0; padding: 12px 14px; border-left: 3px solid var(--red); background: rgba(255, 59, 59, 0.07); }
+.sources { display: grid; gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }
+.sources li { margin: 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.sources .timing { display: block; color: var(--dim); font-size: 14px; }
+.sources p { margin: 6px 0 8px; color: var(--dim); font-size: 15px; }
+.sources .links { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 14px; }
+
+footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--dim); font-size: 14px; }
+
+@media (min-width: 720px) {
+  .sources { grid-template-columns: 1fr 1fr; }
+}

@@ -58,37 +58,32 @@
     <header class="top"><a class="brand" href="/"><span class="mark" aria-hidden="true">LA911</span><span>Louisiana911</span></a><a class="map-link" href="/?source=caddo">Open Caddo map</a></header>
     <nav class="crumb" aria-label="Breadcrumb"><a href="/">Louisiana911</a> / <a href="/coverage/">Coverage</a> / Caddo Parish</nav>
     <main id="content">
-      <section class="hero">
-        <p class="kicker">The original Caddo911, now part of Louisiana911</p>
-        <h1>Caddo 911 calls for Shreveport and Caddo Parish.</h1>
-        <p class="lede">Louisiana911 displays live active events published by the Caddo Parish 911 Communications District. The project began as a focused Caddo911 monitor and now keeps that coverage inside a broader Louisiana public-safety map.</p>
-        <div class="facts" role="group" aria-label="Coverage summary">
-          <div class="fact"><strong>Source</strong><span>Caddo Parish 911 public feed</span></div>
-          <div class="fact"><strong>Timing</strong><span>Live active-event list</span></div>
-          <div class="fact"><strong>Area</strong><span>Shreveport and Caddo Parish</span></div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>Departments and incident information</h2>
-        <p>The public feed can identify Shreveport Police, Shreveport Fire, the Caddo Parish Sheriff's Office, Caddo Fire Districts, and publicly listed EMS activity. Louisiana911 preserves the published incident description, reported time, street, cross streets, municipality, responding-agency code, and unit count.</p>
+      <section>
+        <h2>About the Caddo feed</h2>
+        <p>The Caddo Parish 911 Communications District publishes a list of active calls. Louisiana911 checks that list about once a minute and shows each call on the map and in the list. This site started as Caddo911 and still covers the same feed.</p>
         <ul class="list">
-          <li><strong>SPD:</strong> Shreveport Police Department incidents listed by the source.</li>
-          <li><strong>SFD:</strong> Shreveport Fire Department incidents listed by the source.</li>
-          <li><strong>CSO:</strong> Caddo Parish Sheriff's Office incidents listed by the source.</li>
-          <li><strong>CFD:</strong> Caddo Parish fire-district activity listed by the source.</li>
+          <li><strong>Source:</strong> Caddo Parish 911 active events page</li>
+          <li><strong>Timing:</strong> Live. Calls leave the list when the source removes them and stay available in History.</li>
+          <li><strong>Area:</strong> Shreveport and the rest of Caddo Parish</li>
         </ul>
 
-        <h3>How Caddo locations reach the map</h3>
-        <p>Louisiana911 checks addresses and intersections against source-aware Caddo Parish bounds. When the feed supplies a named street between two cross streets, the map can use the validated midpoint of that street segment. Provider results that only return a broad street-name centroid are rejected rather than shown as a plausible-looking false point.</p>
+        <h3>Agencies in this feed</h3>
+        <ul class="list">
+          <li><strong>SPD:</strong> Shreveport Police Department</li>
+          <li><strong>SFD:</strong> Shreveport Fire Department</li>
+          <li><strong>CSO:</strong> Caddo Parish Sheriff's Office</li>
+          <li><strong>CFD:</strong> Caddo Parish fire districts</li>
+        </ul>
+        <p>Each call keeps the description, time, street, cross streets, area code (for example SHV), agency, and unit count as published.</p>
 
-        <h3>Active does not mean unresolved</h3>
-        <p>The official page is an active-event list, not a complete case record. Incidents can change or disappear when the source updates. A listed call is not proof that a crime occurred, and removal does not establish a particular disposition.</p>
+        <h3>Map locations</h3>
+        <p>Addresses and intersections are matched to a map point and checked against the Caddo Parish boundary. If the feed gives a street between two cross streets, the marker goes on that stretch of street. If a location can't be matched with confidence, the call stays in the list without a marker.</p>
 
-        <div class="actions"><a class="button primary" href="/?source=caddo">View live Caddo 911 calls</a><a class="button source" href="https://ias.ecc.caddo911.com/All_ActiveEvents.aspx" rel="noopener noreferrer">Open official Caddo 911 feed</a></div>
+        <h3>Limits</h3>
+        <p>The source is a list of active calls, not case records. A listed call doesn't mean a crime happened, and a call leaving the list doesn't tell you how it ended. Louisiana911 is independent and not affiliated with Caddo Parish 911 or any responding agency.</p>
+
+        <div class="actions"><a class="button primary" href="/?source=caddo">View Caddo calls</a><a class="button source" href="https://ias.ecc.caddo911.com/All_ActiveEvents.aspx" rel="noopener noreferrer">Official Caddo 911 feed</a></div>
       </section>
-
-      <p class="notice"><strong>Independent and unofficial.</strong> Louisiana911 is not affiliated with Caddo Parish 911 or any responding agency. Public feed information can be delayed, incomplete, changed, or removed.</p>
       <nav class="related" aria-label="Related coverage">Other coverage: <a href="/coverage/baton-rouge/">Baton Rouge</a> · <a href="/coverage/lafayette/">Lafayette Parish</a> · <a href="/coverage/new-orleans/">New Orleans</a></nav>
     </main>
     <footer><span>Citizen-run transparency project. For emergencies, call 911.</span><a href="/about/">Full methodology</a></footer>

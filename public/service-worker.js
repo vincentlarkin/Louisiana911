@@ -1,4 +1,4 @@
-const CACHE_NAME = 'louisiana911-shell-v4.8.2';
+const CACHE_NAME = 'louisiana911-shell-v4.9.1';
 const CORE_ASSETS = [
   new URL('./', self.location).toString(),
   new URL('./index.html', self.location).toString(),
@@ -6,8 +6,6 @@ const CORE_ASSETS = [
   new URL('./about.html', self.location).toString(),
   new URL('./reports/', self.location).toString(),
   new URL('./reports.html', self.location).toString(),
-  new URL('./reports/monthly/', self.location).toString(),
-  new URL('./monthly-reports.html', self.location).toString(),
   new URL('./analytics.js', self.location).toString(),
   new URL('./styles.css', self.location).toString(),
   new URL('./manifest.webmanifest', self.location).toString(),
