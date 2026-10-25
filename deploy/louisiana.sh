@@ -1,16 +1,17 @@
 #!/usr/bin/bash
-# Production deploy for Louisiana911 on the server. Runs as root, invoked by
-# deploy/bin/deploy-louisiana with a commit SHA that has already
-# been checked against the tip of main. The installed copy lives at
-# /srv/deploy/private/louisiana.sh; see deploy/README.md.
+# Production deploy for Louisiana911. Runs as root with a commit SHA that has
+# already been checked against the tip of main. Server paths come from
+# site.conf beside the installed script, which is not kept in git.
 set -euo pipefail
 
-APP_ROOT="/srv/app"
+INSTALLED_SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
+# shellcheck source=/dev/null
+source "$(dirname "$INSTALLED_SCRIPT")/site.conf"
+: "${APP_ROOT:?site.conf must set APP_ROOT}"
 LIVE_REPO_DIR="${APP_ROOT}/repo"
 SRC_REPO_DIR="${APP_ROOT}/.deploy_src_repo"
 TMP_BASE="${APP_ROOT}/.deploy_tmp"
 COMPOSE_FILE="${APP_ROOT}/docker-compose.yml"
-INSTALLED_SCRIPT="/srv/deploy/private/louisiana.sh"
 REPO_URL="https://github.com/vincentlarkin/Louisiana911.git"
 IMAGE="la911"
 DEPLOY_SHA="$1"
@@ -89,7 +90,7 @@ for pair in "deploy/docker-compose.yml:$COMPOSE_FILE" "deploy/louisiana.sh:$INST
   installed="${pair#*:}"
   if ! cmp -s "$tracked" "$installed"; then
     echo "Refused: $installed differs from ${pair%%:*} in the repository."
-    echo "Review the change and install it as root (see deploy/README.md)."
+    echo "Review the change and install it as root."
     exit 5
   fi
 done

@@ -779,6 +779,35 @@
       min-height: 0; /* critical for nested overflow */
     }
     
+    .site-links,
+    .info-coverage-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 14px;
+      font-size: 13px;
+    }
+
+    .site-links {
+      padding: 14px 6px 8px;
+      border-top: 1px solid var(--border);
+      margin-top: 6px;
+    }
+
+    .info-coverage-links {
+      padding: 2px 4px 6px;
+    }
+
+    .site-links a,
+    .info-coverage-links a {
+      color: var(--text-dim);
+      text-underline-offset: 3px;
+    }
+
+    .site-links a:hover,
+    .info-coverage-links a:hover {
+      color: var(--text);
+    }
+
     .incident-list::-webkit-scrollbar {
       width: 6px;
     }

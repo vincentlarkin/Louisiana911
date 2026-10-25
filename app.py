@@ -3579,6 +3579,17 @@ def new_orleans_coverage_redirect():
     return redirect('/coverage/new-orleans/', code=301)
 
 
+@app.route('/coverage/lake-charles/')
+def lake_charles_coverage():
+    return _serve_coverage_map('coverage-lake-charles.html', 'lakecharles', 'Lake Charles police calls',
+                               'Closed LCPD calls for Lake Charles, published after about 24 hours. Not live. Tap a marker for details.')
+
+
+@app.route('/coverage/lake-charles')
+def lake_charles_coverage_redirect():
+    return redirect('/coverage/lake-charles/', code=301)
+
+
 @app.route('/reports/')
 def reports():
     with open(os.path.join(app.root_path, 'public', 'reports.html'), encoding='utf-8') as page:

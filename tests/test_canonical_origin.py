@@ -137,6 +137,7 @@ class CanonicalOriginTests(unittest.TestCase):
             '/coverage/baton-rouge/': 'Baton Rouge Traffic Incidents',
             '/coverage/lafayette/': 'Lafayette Parish Traffic Incidents',
             '/coverage/new-orleans/': 'New Orleans NOPD Calls for Service',
+            '/coverage/lake-charles/': 'Lake Charles Police Calls',
         }
 
         for path, expected_title in expected_pages.items():
@@ -164,6 +165,7 @@ class CanonicalOriginTests(unittest.TestCase):
             '/coverage/baton-rouge/': ('batonrouge', 'Baton Rouge'),
             '/coverage/lafayette/': ('lafayette', 'Lafayette'),
             '/coverage/new-orleans/': ('neworleans', 'New Orleans'),
+            '/coverage/lake-charles/': ('lakecharles', 'Lake Charles'),
         }
         for path, (source, place) in pages.items():
             with self.subTest(path=path):

@@ -1,4 +1,4 @@
-name: Deploy to the server
+name: Deploy
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
-      - name: Connect to Tailscale
+      - name: Connect to the deploy network
         uses: tailscale/github-action@05c58255396c88c609919d571a8b117099c69020 # v2
         with:
           oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}

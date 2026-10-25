@@ -1,7 +1,6 @@
-# Production stack on the server. The deploy script runs this with
-#   --project-directory /srv/app
-# so relative paths resolve there: ./repo is the release, ./data the SQLite
-# files and ./.louisiana911.env the secrets (never committed).
+# Production stack. The deploy script runs this from the app directory, so
+# ./repo is the release, ./data the SQLite files, ./.louisiana911.env the
+# secrets and ./.env the host-specific settings (neither is committed).
 name: la911
 
 x-app: &app
@@ -39,7 +38,7 @@ services:
     networks:
       internal: {}
       nginx_net:
-        # nginx-config/conf.d/louisiana911.conf proxies to this name.
+        # The reverse proxy reaches the app by this name.
         aliases:
           - la911-web
 
@@ -62,4 +61,4 @@ networks:
     driver: bridge
   nginx_net:
     external: true
-    name: proxy_default
+    name: ${LA911_PROXY_NETWORK:?set LA911_PROXY_NETWORK in .env}

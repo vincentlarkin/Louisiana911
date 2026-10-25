@@ -1,13 +1,14 @@
 #!/usr/bin/bash
-# Nightly off-NAS backup staging for Louisiana911. Runs as root from a the server
-# cron job at 3:30 AM Central, after the collector's 3:00 AM archive run. A
-# the server sync task copies the staging folder to off-site storage at 4:00 AM.
-# The installed copy lives at
-# /srv/deploy/private/offsite-backup.sh; see deploy/README.md.
+# Nightly backup staging for Louisiana911. Runs as root after the collector's
+# nightly archive run; a separate sync job copies the staging folder off-site.
+# Server paths come from site.conf beside the installed script.
 set -euo pipefail
 
-DATA_DIR="/srv/app/data"
-STAGING_DIR="/srv/app/offsite"
+# shellcheck source=/dev/null
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/site.conf"
+: "${APP_ROOT:?site.conf must set APP_ROOT}"
+DATA_DIR="${APP_ROOT}/data"
+STAGING_DIR="${APP_ROOT}/offsite"
 KEEP_DAILY_LOCAL=14
 
 exec python3 - "$DATA_DIR" "$STAGING_DIR" "$KEEP_DAILY_LOCAL" <<'PY'
