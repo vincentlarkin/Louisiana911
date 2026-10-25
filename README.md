@@ -56,7 +56,6 @@ Louisiana911 reflects what each public source publishes. It is not a complete re
 - `sources/` — source adapters and normalization
 - `public/` — site interface and coverage pages
 - `tests/` — behavior and source checks
-- `wiki/` — brief project notes
 
 ## License
 
