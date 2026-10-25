@@ -3362,12 +3362,19 @@ def _build_nearby_report(lat: float, lon: float, radius_miles: float, days: int)
 
     radius_m = radius_miles * 1609.344
     matches = []
+    # Wide searches see the same streets, descriptions, and hours thousands of
+    # times; memoize the text normalization per request.
+    unknown_cache: dict[tuple, bool] = {}
     for row in _iter_report_rows(
         _report_db_paths(months), where, args,
         'source, description, agency, time, units, street, cross_streets, municipality, '
         'latitude, longitude, first_seen, geocode_quality',
     ):
-        if _is_unknown_location(row['street'], row['cross_streets']):
+        location_key = (row['street'], row['cross_streets'])
+        unknown = unknown_cache.get(location_key)
+        if unknown is None:
+            unknown = unknown_cache[location_key] = _is_unknown_location(*location_key)
+        if unknown:
             continue
         distance_m = _haversine_m(lat, lon, row['latitude'], row['longitude'])
         if distance_m > radius_m:
@@ -3385,19 +3392,31 @@ def _build_nearby_report(lat: float, lon: float, radius_miles: float, days: int)
     types: dict[str, dict] = {}
     blocks: dict[str, dict] = {}
     approximate = 0
+    month_cache: dict[str, str | None] = {}
+    description_cache: dict[str, str] = {}
+    label_cache: dict[tuple, str | None] = {}
     for incident in matches:
         severity_counts[incident['severity']] += 1
         source_counts[incident['source']] = source_counts.get(incident['source'], 0) + 1
-        month_key = _central_month_key(incident['first_seen'])
+        hour = (incident['first_seen'] or '')[:13]  # the Central month can only change on the hour
+        if hour not in month_cache:
+            month_cache[hour] = _central_month_key(incident['first_seen'])
+        month_key = month_cache[hour]
         if month_key:
             month_counts[month_key] = month_counts.get(month_key, 0) + 1
         if str(incident.get('geocode_quality') or '').startswith('approximate'):
             approximate += 1
-        description = _clean_ws(incident['description'] or '') or 'Unlisted'
+        raw_description = incident['description'] or ''
+        if raw_description not in description_cache:
+            description_cache[raw_description] = _clean_ws(raw_description) or 'Unlisted'
+        description = description_cache[raw_description]
         entry = types.setdefault(description, {'description': description, 'count': 0, 'severity': incident['severity']})
         entry['count'] += 1
         # The published street + cross streets (or block address) is the closest thing to a block.
-        label = _incident_location_label(incident)
+        label_key = (incident['street'], incident['cross_streets'], incident['municipality'])
+        if label_key not in label_cache:
+            label_cache[label_key] = _incident_location_label(incident)
+        label = label_cache[label_key]
         if label:
             block = blocks.setdefault(label.upper(), {
                 'label': label, 'count': 0, 'severity': dict.fromkeys(SEVERITY_ORDER, 0), '_lat': 0.0, '_lon': 0.0,
@@ -3456,8 +3475,9 @@ def _geocode_report_query(query: str) -> list[dict]:
     key = query.lower()
     if key in _report_geocode_cache:
         return _report_geocode_cache[key]
-    if len(_report_geocode_cache) > 512:
-        _report_geocode_cache.pop(next(iter(_report_geocode_cache)), None)
+    with _report_cache_lock:
+        if len(_report_geocode_cache) > 512:
+            _report_geocode_cache.pop(next(iter(_report_geocode_cache)), None)
 
     search = query if re.search(r'\b(la|louisiana)\b', query, re.IGNORECASE) else f"{query}, Louisiana"
     results: list[dict] = []

@@ -23,7 +23,9 @@ services:
   web:
     <<: *app
     container_name: la911_web
-    command: ["gunicorn", "-w", "1", "-b", "0.0.0.0:3911", "app:app"]
+    # One process keeps the in-memory caches and rate limits shared; threads
+    # stop a slow geocode or wide report from stalling the live feed.
+    command: ["gunicorn", "-w", "1", "--threads", "8", "-b", "0.0.0.0:3911", "app:app"]
     env_file:
       - ./.louisiana911.env
     expose:

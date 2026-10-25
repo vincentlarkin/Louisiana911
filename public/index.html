@@ -3611,16 +3611,29 @@
     
     // Poll for updates with dynamic interval from /api/status.
     // This keeps chatter low and aligned with backend scrape cadence.
+    // Background tabs skip polls and catch up as soon as they are shown again.
+    let lastPollAt = Date.now();
+    let pollTimer = null;
     async function pollLoop() {
+      clearTimeout(pollTimer);
+      if (document.hidden) {
+        pollTimer = setTimeout(pollLoop, pollIntervalMs);
+        return;
+      }
+      lastPollAt = Date.now();
       await updateIncidents();
       const nextInterval = await updateStatus();
       if (typeof nextInterval === 'number' && Number.isFinite(nextInterval)) {
         pollIntervalMs = Math.max(60000, Math.round(nextInterval));
       }
-      setTimeout(pollLoop, pollIntervalMs);
+      pollTimer = setTimeout(pollLoop, pollIntervalMs);
     }
 
-    setTimeout(pollLoop, pollIntervalMs);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && Date.now() - lastPollAt >= pollIntervalMs) pollLoop();
+    });
+
+    pollTimer = setTimeout(pollLoop, pollIntervalMs);
   </script>
 </body>
 </html>
