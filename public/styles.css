@@ -743,29 +743,6 @@
       background: rgba(59, 139, 255, 0.12);
     }
 
-    .source-delay-banner {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      min-height: 29px;
-      padding: 6px 10px;
-      border-bottom: 1px solid rgba(59, 139, 255, 0.18);
-      background: rgba(59, 139, 255, 0.07);
-      color: #a9c8ff;
-      font-size: 9px;
-      line-height: 1.35;
-      letter-spacing: 0.01em;
-    }
-
-    .source-delay-dot {
-      width: 6px;
-      height: 6px;
-      flex: 0 0 auto;
-      border-radius: 50%;
-      background: #78aaff;
-      box-shadow: 0 0 0 3px rgba(59, 139, 255, 0.11);
-    }
-
     .source-tabs .source-tab {
       justify-content: center;
       padding-inline: 6px;
@@ -1080,7 +1057,6 @@
       }
 
       body.list-view .source-tabs,
-      body.list-view .source-delay-banner,
       body.list-view .filter-bar,
       body.list-view #live-panel,
       body.list-view #history-panel {
@@ -3021,7 +2997,6 @@
 
       .sidebar.collapsed .filter-bar,
       .sidebar.collapsed .source-tabs,
-      .sidebar.collapsed .source-delay-banner,
       .sidebar.collapsed #live-panel,
       .sidebar.collapsed #history-panel,
       .sidebar.collapsed .history-controls {
@@ -3055,7 +3030,6 @@
 
       body.list-view .sidebar.collapsed .filter-bar,
       body.list-view .sidebar.collapsed .source-tabs,
-      body.list-view .sidebar.collapsed .source-delay-banner,
       body.list-view .sidebar.collapsed #live-panel,
       body.list-view .sidebar.collapsed #history-panel:not(.hidden) {
         display: flex;
@@ -3180,11 +3154,6 @@
         padding: 8px 12px;
       }
 
-      .source-delay-banner {
-        min-height: 28px;
-        padding: 5px max(9px, env(safe-area-inset-right)) 5px max(9px, env(safe-area-inset-left));
-        font-size: 12px;
-      }
 
       .info-logo {
         width: 78px;

@@ -3489,7 +3489,7 @@ def about_redirect():
 
 @app.route('/caddo911/')
 def caddo911_landing():
-    return _serve_coverage_map('caddo911.html', 'caddo', 'Caddo 911 live calls',
+    return _serve_coverage_map('caddo911.html', 'caddo', 'Caddo 911 active calls',
                                'Shreveport and Caddo Parish calls from the public Caddo 911 feed. Tap a marker for incident details. Independent and unofficial.')
 
 

@@ -152,22 +152,6 @@ test('every feed displays its reported date and keeps the source clock unchanged
   }
 });
 
-test('Lake Charles delay notice stays honest when no recent calls are available', () => {
-  const banner = { classList: { add() {}, remove() {} } };
-  const text = {};
-  const ctx = loadFunctions(['normalizeSource', 'formatPublishedAge', 'updateSourceDelayBanner'], {
-    currentSource: 'lakecharles', currentIncidents: [],
-    document: { getElementById: id => id === 'source-delay-banner' ? banner : text },
-  });
-  ctx.updateSourceDelayBanner();
-  assert.match(text.textContent, /published after 24h/);
-  assert.match(text.textContent, /unavailable/);
-  assert.doesNotMatch(text.textContent, /loading|live/i);
-  ctx.currentIncidents = [{ source: 'lakecharles', first_seen: new Date(Date.now() - 26 * 3600000).toISOString() }];
-  ctx.updateSourceDelayBanner();
-  assert.match(text.textContent, /newest call 1d 2h ago/);
-});
-
 test('triangle preference renders one transparent shape without a nested circle', () => {
   const ctx = loadFunctions(['markerIcon'], {
     triangleMarkers: true, getSeverity: () => 'low', getSeverityColor: () => '#3b8bff',

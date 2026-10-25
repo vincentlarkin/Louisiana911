@@ -354,10 +354,6 @@
         </button>
       </div>
 
-      <div class="source-delay-banner hidden" id="source-delay-banner" role="status" aria-live="polite">
-        <span class="source-delay-dot" aria-hidden="true"></span>
-        <span id="source-delay-text">New Orleans publishes daily</span>
-      </div>
 
       <!-- Shared filters (apply to Live + History lists) -->
       <div class="filter-bar">
@@ -1033,45 +1029,7 @@
     const urgencyFilterButtons = Array.from(document.querySelectorAll('.filter-group[data-filter-type="urgency"] [data-urgency]'));
     const historyMajorEventsButton = document.getElementById('history-major-events');
 
-    function formatPublishedAge(milliseconds) {
-      const minutes = Math.max(0, Math.floor(milliseconds / 60000));
-      if (minutes < 1) return 'just now';
-      if (minutes < 60) return `${minutes}m ago`;
-      const hours = Math.floor(minutes / 60);
-      const remainingMinutes = minutes % 60;
-      if (hours < 24) return `${hours}h${remainingMinutes ? ` ${remainingMinutes}m` : ''} ago`;
-      const days = Math.floor(hours / 24);
-      const remainingHours = hours % 24;
-      return `${days}d${remainingHours ? ` ${remainingHours}h` : ''} ago`;
-    }
 
-    function updateSourceDelayBanner() {
-      const banner = document.getElementById('source-delay-banner');
-      const text = document.getElementById('source-delay-text');
-      if (!banner || !text) return;
-      const selected = currentSource === 'lakecharles' || currentSource === 'neworleans';
-      const delayed = currentIncidents.filter(incident => ['lakecharles', 'neworleans'].includes(normalizeSource(incident?.source)));
-      if (!selected && (currentSource !== 'all' || !delayed.length)) {
-        banner.classList.add('hidden');
-        return;
-      }
-      let message = 'Includes delayed reports: New Orleans daily · Lake Charles closed calls, 24h delay';
-      if (selected) {
-        const label = currentSource === 'lakecharles'
-          ? 'LCPD closed calls · published after 24h'
-          : 'New Orleans daily calls';
-        const timestamps = delayed.filter(incident => normalizeSource(incident.source) === currentSource)
-          .map(incident => Date.parse(incident.first_seen || '')).filter(Number.isFinite);
-        message = timestamps.length
-          ? `${label} · newest call ${formatPublishedAge(Date.now() - Math.max(...timestamps))}`
-          : `${label} · recent reports may be unavailable`;
-      }
-      text.textContent = message;
-      banner.title = currentSource === 'lakecharles'
-        ? 'Police calls include traffic, reported crimes and service calls. Closed does not mean a crime was confirmed. Latest shows up to 150 recent reports; History includes all imported calls.'
-        : message;
-      banner.classList.remove('hidden');
-    }
 
     function buildIncidentListSignature(incidents, keyPrefix = '') {
       const items = Array.isArray(incidents) ? incidents : [];
@@ -2498,7 +2456,6 @@
         
         // Store all incidents
         currentIncidents = allIncidents;
-        updateSourceDelayBanner();
 
         // Only update shared filter visibility from the active feed when the Live tab is visible.
         // Otherwise History's filter visibility would get overridden every poll.
@@ -3351,7 +3308,6 @@
         if (btn.dataset.source === currentSource) btn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       });
       syncAgencyFilterGroupsToSource();
-      updateSourceDelayBanner();
       focusMapOnSourceSelection(currentSource);
       updateStatus();
 
@@ -3380,7 +3336,6 @@
         document.getElementById('live-panel').classList.toggle('hidden', tabName !== 'live');
         document.getElementById('history-panel').classList.toggle('hidden', tabName !== 'history');
         historyMajorEventsButton?.classList.toggle('hidden', tabName !== 'history');
-        updateSourceDelayBanner();
         
         if (tabName === 'history') {
           mapMode = 'history';
@@ -3653,7 +3608,6 @@
     // Initial load
     updateIncidents();
     updateStatus();
-    setInterval(updateSourceDelayBanner, 60000);
     
     // Poll for updates with dynamic interval from /api/status.
     // This keeps chatter low and aligned with backend scrape cadence.
