@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en-US">
 <head>
-  <script defer src="/analytics.js?v=4.8.1"></script>
+  <script defer src="/analytics.js?v=4.8.2"></script>
   <meta charset="UTF-8">
   <script type="application/json" id="map-config">{}</script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -83,7 +83,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.9.2" />
+  <link rel="stylesheet" href="styles.css?v=4.9.3" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -205,6 +205,10 @@
                 <span class="info-link-badge">LCPD</span>
                 Lake Charles Closed Calls · 24h delay
               </a>
+              <a href="https://sulphur.policetocitizen.com/cadcalls" target="_blank" class="info-link" rel="noopener noreferrer">
+                <span class="info-link-badge">SPD</span>
+                Sulphur Closed Calls · 24h delay
+              </a>
             </div>
           </details>
           <a href="https://github.com/vincentlarkin/Louisiana911" target="_blank" class="info-link" rel="noopener noreferrer">
@@ -224,7 +228,7 @@
             Reports: counts by parish and near a place
           </a>
           <a href="/coverage/" class="info-link">
-            <span class="info-link-badge">5</span>
+            <span class="info-link-badge">6</span>
             Coverage by city and parish
           </a>
           <nav class="info-coverage-links" aria-label="Coverage pages">
@@ -233,6 +237,7 @@
             <a href="/coverage/lafayette/">Lafayette</a>
             <a href="/coverage/new-orleans/">New Orleans</a>
             <a href="/coverage/lake-charles/">Lake Charles</a>
+            <a href="/coverage/sulphur/">Sulphur</a>
           </nav>
           <a href="/about/" class="info-link">
             <span class="info-link-badge">LA</span>
@@ -358,6 +363,9 @@
         </button>
         <button class="source-tab" type="button" data-source="lakecharles" title="Lake Charles police closed calls — published with a 24-hour delay">
           Lake Charles <span class="daily-pill">24h delay</span>
+        </button>
+        <button class="source-tab" type="button" data-source="sulphur" title="Sulphur police closed calls — published with a 24-hour delay">
+          Sulphur <span class="daily-pill">24h delay</span>
         </button>
       </div>
 
@@ -1015,7 +1023,9 @@
       }
     }
     const sourceFromUrl = coverageSource || new URLSearchParams(window.location.search).get('source');
-    const supportedSources = new Set(['all', 'caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles']);
+    const supportedSources = new Set(['all', 'caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles', 'sulphur']);
+    // Police-to-Citizen feeds: closed calls published after about 24 hours, never active.
+    const DELAYED_CLOSED_SOURCES = new Set(['lakecharles', 'sulphur']);
     let currentSource = supportedSources.has(sourceFromUrl) ? sourceFromUrl : 'all';
     let currentLafayetteUnit = 'all'; // 'all' | 'police' | 'sheriff' | 'fire'
     let currentBatonRougeAgency = 'all'; // 'all' | 'law' | 'oss'
@@ -1178,13 +1188,14 @@
       return '#ffb830';
     }
 
-    const SOURCE_ORDER = ['caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles'];
+    const SOURCE_ORDER = ['caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles', 'sulphur'];
     const SOURCE_MAP_VIEWS = {
       caddo: { center: [32.5252, -93.7502], zoom: 11 },
       batonrouge: { center: [30.4515, -91.1871], zoom: 11 },
       lafayette: { center: [30.2241, -92.0198], zoom: 11 },
       neworleans: { center: [29.9511, -90.0715], zoom: 11 },
       lakecharles: { center: [30.2266, -93.2174], zoom: 12 },
+      sulphur: { center: [30.2366, -93.3774], zoom: 12 },
       all: { center: [31.0, -92.3], zoom: 7 },
     };
 
@@ -1194,6 +1205,7 @@
       if (s === 'lafayette') return 'lafayette';
       if (s === 'neworleans') return 'neworleans';
       if (s === 'lakecharles') return 'lakecharles';
+      if (s === 'sulphur') return 'sulphur';
       if (s === 'caddo') return 'caddo';
       return 'caddo';
     }
@@ -1204,6 +1216,7 @@
       if (source === 'lafayette') return 'Lafayette';
       if (source === 'neworleans') return 'New Orleans (Daily)';
       if (source === 'lakecharles') return 'Lake Charles (24h delay)';
+      if (source === 'sulphur') return 'Sulphur (24h delay)';
       return 'Caddo';
     }
 
@@ -1251,6 +1264,7 @@
         ['lafayette', []],
         ['neworleans', []],
         ['lakecharles', []],
+        ['sulphur', []],
       ]);
       (incidents || []).forEach((incident) => {
         const source = normalizeSource(incident?.source);
@@ -1747,7 +1761,7 @@
     }
 
     function incidentActivityState(incident, mode = 'live') {
-      if (incident?.source === 'lakecharles') {
+      if (DELAYED_CLOSED_SOURCES.has(incident?.source)) {
         return { active: false, veryActive: false, label: 'CLOSED CALL · 24H PUBLICATION DELAY', className: 'historical' };
       }
       const explicitlyActive = Number(incident?.is_active) === 1;
@@ -1947,7 +1961,7 @@
       let popupHtml = `
         <div class="popup-content sev-${sev}">
           <div class="popup-title">${escapeHtml(incident.description || 'Incident')}</div>
-          ${incident.source === 'lakecharles' ? '<div class="popup-detail">Closed police call · 24h publication delay</div>' : ''}
+          ${DELAYED_CLOSED_SOURCES.has(incident.source) ? '<div class="popup-detail">Closed police call · 24h publication delay</div>' : ''}
           <div class="popup-detail"><span class="popup-label">Location</span>${escapeHtml(locationStr)}</div>
           ${approximate ? '<div class="popup-detail"><span class="popup-label">Map</span><span class="location-accuracy-note">Approximate Location</span></div>' : ''}
           <div class="popup-detail" title="Source-reported Central time. For undated feeds, date is estimated from first observation."><span class="popup-label">Time</span>${escapeHtml(incidentTimeLabel(incident))}</div>
@@ -2125,7 +2139,7 @@
     }
     
     function incidentTimeLabel(incident) {
-      const original = ['lakecharles', 'neworleans'].includes(incident?.source) ? incident.first_seen : '';
+      const original = (incident?.source === 'neworleans' || DELAYED_CLOSED_SOURCES.has(incident?.source)) ? incident.first_seen : '';
       const timestamp = Date.parse(incident?.reported_at || original || '');
       if (Number.isFinite(timestamp)) {
         const date = new Date(timestamp).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric' });
@@ -2151,7 +2165,7 @@
       const shareId = getIncidentShareId(incident);
       
       return `
-        <div class="incident-card ${sevClass} ${isNew ? 'new' : ''}${interactiveClass}${['lakecharles', 'neworleans'].includes(incident.source) || incident.reported_at ? ' dated-call' : ''}"
+        <div class="incident-card ${sevClass} ${isNew ? 'new' : ''}${interactiveClass}${incident.source === 'neworleans' || DELAYED_CLOSED_SOURCES.has(incident.source) || incident.reported_at ? ' dated-call' : ''}"
              data-id="${incident.id}"${interactionAttrs}>
           <div class="incident-header">
             <span class="incident-type">${escapeHtml(incident.description || 'Incident')}</span>
@@ -2161,7 +2175,7 @@
             <span>${escapeHtml(locationText)}</span>
             ${approximate ? '<span class="location-accuracy-note">Approximate Location</span>' : ''}
             ${!hasLocation ? '<span class="location-accuracy-note">Map location unavailable</span>' : ''}
-            ${incident.source === 'lakecharles' ? '<span class="incident-publication">Closed police call · 24h delay</span>' : ''}
+            ${DELAYED_CLOSED_SOURCES.has(incident.source) ? '<span class="incident-publication">Closed police call · 24h delay</span>' : ''}
           </div>
           <div class="incident-meta">
             <span class="incident-agency ${sevClass}" title="Severity: ${sev.toUpperCase()}">${escapeHtml(agencyDisplay)}</span>
@@ -2516,6 +2530,7 @@
         <a href="/coverage/lafayette/">Lafayette 911 traffic</a>
         <a href="/coverage/new-orleans/">New Orleans 911 calls</a>
         <a href="/coverage/lake-charles/">Lake Charles police calls</a>
+        <a href="/coverage/sulphur/">Sulphur police calls</a>
         <a href="/reports/">Reports</a>
         <a href="/about/">About</a>
       </nav>`;
@@ -2535,7 +2550,7 @@
         const hasUrgencyFilter = currentUrgencyFilter !== 'all';
         const hasAnyFilter = hasAgencyFilter || hasUrgencyFilter;
         
-        let label = ['lakecharles', 'neworleans'].includes(currentSource) ? 'published' : 'active';
+        let label = (currentSource === 'neworleans' || DELAYED_CLOSED_SOURCES.has(currentSource)) ? 'published' : 'active';
         if (hasAgencyFilter && hasUrgencyFilter) {
           label = `${urgencyLabel(currentUrgencyFilter)} ${currentUnitFilterLabelForUi()}`;
         } else if (hasAgencyFilter) {
@@ -2725,7 +2740,7 @@
         // unambiguous. The combined view also uses the collector timestamp.
         if (selectedFeedRefresh && !['all', 'caddo'].includes(currentSource)) {
           const tz = status.centralTzAbbr || 'CT';
-          el.textContent = ['neworleans', 'lakecharles'].includes(currentSource)
+          el.textContent = (currentSource === 'neworleans' || DELAYED_CLOSED_SOURCES.has(currentSource))
             ? selectedFeedRefresh
             : `${selectedFeedRefresh} ${tz}`;
         } else if (status.lastUpdateDisplay) {
@@ -3310,7 +3325,7 @@
 
     function applySourceFilter(source) {
       const normalized = String(source || '').toLowerCase();
-      if (!['all', 'caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles'].includes(normalized)) return;
+      if (!supportedSources.has(normalized)) return;
       if (currentSource === normalized) {
         focusMapOnSourceSelection(normalized);
         return;
@@ -3577,7 +3592,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.9.2', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.9.3', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);

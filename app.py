@@ -34,6 +34,7 @@ from sources import lafayette as lafayette_source
 from sources import batonrouge as batonrouge_source
 from sources import neworleans as neworleans_source
 from sources import lakecharles as lakecharles_source
+from sources import sulphur as sulphur_source
 
 app = Flask(__name__, static_folder='public', static_url_path='')
 
@@ -279,6 +280,7 @@ feed_refreshed_by_source: dict[str, str | None] = {
     "batonrouge": None,
     "neworleans": None,
     "lakecharles": None,
+    "sulphur": None,
 }
 last_scrape_started_at: str | None = None  # ISO UTC
 last_scrape_finished_at: str | None = None  # ISO UTC
@@ -956,9 +958,10 @@ def _serve_shared_incident_page(incident: dict):
     units = int(payload.get('units') or 0)
     is_active = bool(payload.get('is_active'))
 
-    if payload.get('source') == 'lakecharles':
+    if payload.get('source') in DELAYED_CLOSED_CALL_SOURCES:
         status_label = 'CLOSED POLICE CALL'
-        summary_lead = 'Lake Charles police call published with a 24-hour delay'
+        city = REPORT_SOURCE_LABELS.get(payload.get('source'), 'Police')
+        summary_lead = f'{city} police call published with a 24-hour delay'
     elif is_active and units >= 5:
         status_label = 'BREAKING - VERY ACTIVE'
         summary_lead = f'Very active public incident with {units} assigned units'
@@ -1409,6 +1412,12 @@ SOURCE_GEO_PROFILES = {
         "default_city": "Lake Charles", "county": "Calcasieu Parish",
         # Census QuickFacts 2020 land area; not a claim of complete CAD coverage.
         "area_sq_miles": 45.65,
+    },
+    "sulphur": {
+        "lat_min": sulphur_source.LAT_MIN, "lat_max": sulphur_source.LAT_MAX,
+        "lon_min": sulphur_source.LON_MIN, "lon_max": sulphur_source.LON_MAX,
+        "center_lat": 30.2366, "center_lon": -93.3774,
+        "default_city": "Sulphur", "county": "Calcasieu Parish",
     },
     "caddo": {
         "lat_min": 32.10,
@@ -2429,6 +2438,23 @@ def scrape_lakecharles_incidents():
         return [], None
 
 
+def scrape_sulphur_incidents():
+    """Import only the anonymous site's published, delayed Sulphur PD closed calls."""
+    try:
+        return sulphur_source.scrape(user_agent=SCRAPER_USER_AGENT, timeout_seconds=20)
+    except Exception as error:
+        log(f"Sulphur import unavailable: {error}")
+        return [], None
+
+
+# Police-to-Citizen closed-call feeds: published after a delay, never active,
+# shown as a bounded recent slice. Maps source name to its adapter module.
+DELAYED_CLOSED_CALL_SOURCES = {
+    'lakecharles': lakecharles_source,
+    'sulphur': sulphur_source,
+}
+
+
 # Backwards compatibility for any old call sites.
 def scrape_incidents():
     return scrape_caddo_incidents()
@@ -2442,6 +2468,7 @@ SOURCE_MIN_SCRAPE_INTERVAL_SECONDS = {
     # feed cycle would create load without making the site any fresher.
     'neworleans': 15 * 60,
     'lakecharles': 30 * 60,
+    'sulphur': 30 * 60,
 }
 
 
@@ -2549,7 +2576,7 @@ def _incident_geocode_result(incident: dict, source_name: str) -> dict:
             'provider_responded': True,
         }
 
-    if source_name == 'lakecharles':
+    if source_name in DELAYED_CLOSED_CALL_SOURCES:
         # Respect withheld/missing public coordinates. No private-address or
         # city-center fallback for this generalized closed-call dataset.
         return {
@@ -2805,7 +2832,7 @@ def _store_incidents(conn, incidents, source_default: str, deactivate_missing: b
                 )
             except (TypeError, ValueError):
                 has_source_point = False
-            if has_source_point or incident_source == 'lakecharles':
+            if has_source_point or incident_source in DELAYED_CLOSED_CALL_SOURCES:
                 current_geo = _collector_geocode_result(conn, incident, incident_source)
                 cursor.execute(
                     '''UPDATE incidents
@@ -2956,7 +2983,7 @@ def _store_incidents(conn, incidents, source_default: str, deactivate_missing: b
                         now,
                         desired_active,
                     ))
-            if incident_source not in ('neworleans', 'lakecharles'):
+            if incident_source != 'neworleans' and incident_source not in DELAYED_CLOSED_CALL_SOURCES:
                 log(f"New incident: {incident['description']} at {incident['street'] or incident['cross_streets']}")
 
         if has_peak_units and not existing:
@@ -3016,6 +3043,7 @@ def background_scrape():
         ('lafayette', 'Lafayette 911', scrape_lafayette_incidents),
         ('neworleans', 'New Orleans daily calls for service', scrape_neworleans_incidents),
         ('lakecharles', 'Lake Charles closed police calls (24-hour delay)', scrape_lakecharles_incidents),
+        ('sulphur', 'Sulphur closed police calls (24-hour delay)', scrape_sulphur_incidents),
     ]
     for source_name, label, scraper in source_jobs:
         min_interval = SOURCE_MIN_SCRAPE_INTERVAL_SECONDS.get(source_name, 0)
@@ -3042,7 +3070,7 @@ def background_scrape():
     meta_set('last_scrape_finished_at', last_scrape_finished_at)
 
 
-VALID_SOURCES = {'caddo', 'lafayette', 'batonrouge', 'neworleans', 'lakecharles'}
+VALID_SOURCES = {'caddo', 'lafayette', 'batonrouge', 'neworleans', 'lakecharles', 'sulphur'}
 
 
 def _normalize_source_filter(value: str | None) -> str:
@@ -3181,6 +3209,7 @@ REPORT_SOURCE_LABELS = {
     'lafayette': 'Lafayette Parish',
     'neworleans': 'New Orleans',
     'lakecharles': 'Lake Charles',
+    'sulphur': 'Sulphur',
 }
 REPORT_NEARBY_RADII = (0.1, 0.25, 0.5, 1.0, 2.0)
 REPORT_NEARBY_DAYS = (30, 90, 365, 0)  # 0 = everything on record
@@ -3590,6 +3619,17 @@ def lake_charles_coverage_redirect():
     return redirect('/coverage/lake-charles/', code=301)
 
 
+@app.route('/coverage/sulphur/')
+def sulphur_coverage():
+    return _serve_coverage_map('coverage-sulphur.html', 'sulphur', 'Sulphur police calls',
+                               'Closed Sulphur Police calls for Sulphur and Westlake, published after about 24 hours. Not live. Tap a marker for details.')
+
+
+@app.route('/coverage/sulphur')
+def sulphur_coverage_redirect():
+    return redirect('/coverage/sulphur/', code=301)
+
+
 @app.route('/reports/')
 def reports():
     with open(os.path.join(app.root_path, 'public', 'reports.html'), encoding='utf-8') as page:
@@ -3629,7 +3669,7 @@ def _incident_reported_at(incident):
     """
     source = _normalize_incident_source_for_read(incident.get('source'))
     first_seen = _parse_iso_datetime(incident.get('first_seen'))
-    if source in ('neworleans', 'lakecharles'):
+    if source == 'neworleans' or source in DELAYED_CLOSED_CALL_SOURCES:
         return first_seen.isoformat() if first_seen else None
     if source not in LIVE_SNAPSHOT_SOURCES:
         return None
@@ -3676,15 +3716,17 @@ def get_active_incidents():
         else:
             cursor.execute('SELECT * FROM incidents WHERE is_active = 1 AND source = ? ORDER BY time DESC', (source_filter,))
         incidents = [dict(row) for row in cursor.fetchall()]
-        if has_source_column and source_filter in ('all', 'lakecharles'):
+        for delayed_source, adapter in DELAYED_CLOSED_CALL_SOURCES.items():
+            if not has_source_column or source_filter not in ('all', delayed_source):
+                continue
             # Latest includes a bounded recent slice of closed calls. Keep
             # is_active=0 so they are never counted as active and are available
             # in History immediately, under their original call date.
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=lakecharles_source.RECENT_DAYS)).isoformat()
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=adapter.RECENT_DAYS)).isoformat()
             cursor.execute(
-                "SELECT * FROM incidents WHERE source = 'lakecharles' AND is_active = 0 "
+                "SELECT * FROM incidents WHERE source = ? AND is_active = 0 "
                 "AND first_seen >= ? ORDER BY first_seen DESC, id DESC LIMIT ?",
-                (cutoff, lakecharles_source.RECENT_LIMIT),
+                (delayed_source, cutoff, adapter.RECENT_LIMIT),
             )
             incidents.extend(dict(row) for row in cursor.fetchall())
     except sqlite3.OperationalError:
@@ -3963,6 +4005,7 @@ def get_status():
         'feed_refreshed_at_batonrouge',
         'feed_refreshed_at_neworleans',
         'feed_refreshed_at_lakecharles',
+        'feed_refreshed_at_sulphur',
         'last_scrape_started_at',
         'last_scrape_finished_at',
         'scrape_interval_seconds',
@@ -3982,6 +4025,7 @@ def get_status():
         'batonrouge': meta.get('feed_refreshed_at_batonrouge') or feed_refreshed_by_source.get('batonrouge'),
         'neworleans': meta.get('feed_refreshed_at_neworleans') or feed_refreshed_by_source.get('neworleans'),
         'lakecharles': meta.get('feed_refreshed_at_lakecharles') or feed_refreshed_by_source.get('lakecharles'),
+        'sulphur': meta.get('feed_refreshed_at_sulphur') or feed_refreshed_by_source.get('sulphur'),
     }
 
     return jsonify({

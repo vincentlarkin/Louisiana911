@@ -189,7 +189,7 @@
     const feature = target.closest?.('[data-source], [data-view-mode], [data-tab], [data-filter], [data-urgency], [data-br-agency], [data-laf-unit], [data-basemap]');
     if (!feature) return;
     const data = feature.dataset;
-    if (data.source && ['all', 'caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles'].includes(data.source)) {
+    if (data.source && ['all', 'caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles', 'sulphur'].includes(data.source)) {
       const previousSource = getSourceView();
       if (previousSource !== data.source) lastFeedResult = '';
       track('source_select', { source_view: data.source, previous_source: previousSource });
@@ -382,7 +382,7 @@
     const source = document.querySelector('.source-tab.active')?.dataset.source
       || document.querySelector('#report-source')?.value
       || new URLSearchParams(location.search).get('source') || '';
-    return ['caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles'].includes(source) ? source : 'all';
+    return ['caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles', 'sulphur'].includes(source) ? source : 'all';
   }
 
   function getActionType(target, link, mapElement) {

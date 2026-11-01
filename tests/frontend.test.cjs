@@ -7,6 +7,10 @@ const path = require('node:path');
 const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 function loadFunctions(names, globals = {}) {
   const context = vm.createContext({ console, window: {}, ...globals });
+  // Shared source sets the loaded functions read; defined once at script top level.
+  const delayed = /    const DELAYED_CLOSED_SOURCES = .*;/.exec(html);
+  assert.ok(delayed, 'Missing DELAYED_CLOSED_SOURCES');
+  vm.runInContext(delayed[0], context);
   for (const name of names) {
     const match = new RegExp(`    (?:async )?function ${name}\\(`).exec(html);
     assert.ok(match, `Missing function ${name}`);
@@ -129,6 +133,17 @@ test('Lake Charles has its own source and cannot be labeled active or breaking',
   assert.equal(ctx.formatUnitCount(0), 'Units not listed');
 });
 
+test('Sulphur is its own delayed source and cannot be labeled active or breaking', () => {
+  const ctx = loadFunctions(['normalizeSource', 'sourceLabel', 'incidentActivityState', 'formatTime', 'incidentTimeLabel'], { UNIT_PULSE_THRESHOLD: 5 });
+  assert.equal(ctx.normalizeSource('sulphur'), 'sulphur');
+  assert.match(ctx.sourceLabel('sulphur'), /^Sulphur .*24h delay/);
+  const state = ctx.incidentActivityState({ source: 'sulphur', is_active: 1, units: 10 });
+  assert.equal(state.active, false);
+  assert.equal(state.veryActive, false);
+  assert.match(state.label, /CLOSED CALL/);
+  assert.equal(ctx.incidentTimeLabel({ source: 'sulphur', time: '2345', first_seen: '2026-10-31T04:45:43Z' }), 'Oct-30 23:45');
+});
+
 test('Caddo keeps the reported clock and anchored date across midnight in every view', () => {
   const ctx = loadFunctions(['formatTime', '_incidentTimeValue', 'incidentTimeLabel']);
   const older = { source: 'caddo', time: '2350', reported_at: '2026-09-05T04:50:00+00:00',
@@ -145,7 +160,7 @@ test('Caddo keeps the reported clock and anchored date across midnight in every 
 
 test('every feed displays its reported date and keeps the source clock unchanged', () => {
   const ctx = loadFunctions(['formatTime', 'incidentTimeLabel']);
-  for (const source of ['caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles']) {
+  for (const source of ['caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles', 'sulphur']) {
     const call = { source, time: '2350', reported_at: '2026-09-02T04:50:00Z',
       first_seen: '2026-09-05T05:10:00Z', last_seen: '2026-09-06T12:00:00Z' };
     assert.equal(ctx.incidentTimeLabel(call), 'Sep-1 23:50', source);

@@ -78,13 +78,13 @@ class LiveLifecycleTests(unittest.TestCase):
                                      (other, other, '2026-09-05T12:00:00+00:00'))
                     conn.commit()
                     app.process_incidents(None, source=source, allow_empty=True)
-                    self.assertEqual(conn.execute('SELECT SUM(is_active) FROM incidents').fetchone()[0], 5)
+                    self.assertEqual(conn.execute('SELECT SUM(is_active) FROM incidents').fetchone()[0], len(app.VALID_SOURCES))
                     app.process_incidents([], source=source, allow_empty=True)
-                    self.assertEqual(conn.execute('SELECT SUM(is_active) FROM incidents').fetchone()[0], 4)
+                    self.assertEqual(conn.execute('SELECT SUM(is_active) FROM incidents').fetchone()[0], len(app.VALID_SOURCES) - 1)
                     rows, count = app._query_history_candidates(conn, app._central_date_bounds_utc('2026-09-05'), source, 10)
                     self.assertEqual(count, 1)
                     self.assertEqual(rows[0]['source'], source)
-                    self.assertEqual(conn.execute('SELECT COUNT(*) FROM incidents').fetchone()[0], 5)
+                    self.assertEqual(conn.execute('SELECT COUNT(*) FROM incidents').fetchone()[0], len(app.VALID_SOURCES))
                 finally:
                     conn.close()
 
@@ -114,7 +114,7 @@ class LiveLifecycleTests(unittest.TestCase):
     def test_baton_rouge_overnight_date_and_delayed_original_dates(self):
         self.assertEqual(app._incident_reported_at(dict(source='batonrouge', time='2350',
                          first_seen='2026-09-05T05:10:00Z')), '2026-09-05T04:50:00+00:00')
-        for source in ['neworleans', 'lakecharles', 'lafayette']:
+        for source in ['neworleans', 'lakecharles', 'sulphur', 'lafayette']:
             call = dict(source=source, time='2350', first_seen='2026-09-02T04:50:00+00:00', last_seen='2026-09-05T12:00:00Z')
             self.assertEqual(app._incident_reported_at(call), '2026-09-02T04:50:00+00:00')
 
