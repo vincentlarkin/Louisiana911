@@ -8,9 +8,11 @@ const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8
 function loadFunctions(names, globals = {}) {
   const context = vm.createContext({ console, window: {}, ...globals });
   // Shared source sets the loaded functions read; defined once at script top level.
-  const delayed = /    const DELAYED_CLOSED_SOURCES = .*;/.exec(html);
-  assert.ok(delayed, 'Missing DELAYED_CLOSED_SOURCES');
-  vm.runInContext(delayed[0], context);
+  for (const name of ['DELAYED_CLOSED_SOURCES', 'SOURCE_GROUPS', 'SOURCE_ALIASES']) {
+    const line = new RegExp(`    const ${name} = .*;`).exec(html);
+    assert.ok(line, `Missing ${name}`);
+    vm.runInContext(line[0], context);
+  }
   for (const name of names) {
     const match = new RegExp(`    (?:async )?function ${name}\\(`).exec(html);
     assert.ok(match, `Missing function ${name}`);
@@ -42,7 +44,8 @@ test('parish landing pages open the map despite saved list or mobile defaults an
         });
         vm.runInContext(html.slice(start, end) + html.slice(sourceStart, sourceEnd), ctx);
         assert.equal(vm.runInContext('viewMode', ctx), source ? 'map' : saved || (mobile ? 'list' : 'map'));
-        assert.equal(vm.runInContext('currentSource', ctx), source || 'lakecharles');
+        // Lake Charles and Sulphur links open the combined Calcasieu tab.
+        assert.equal(vm.runInContext('currentSource', ctx), source || 'calcasieu');
       }
     }
   }
@@ -133,6 +136,22 @@ test('Lake Charles has its own source and cannot be labeled active or breaking',
   assert.equal(ctx.formatUnitCount(0), 'Units not listed');
 });
 
+test('Calcasieu tab shows Lake Charles and Sulphur together, in one group of the All view', () => {
+  const ctx = loadFunctions(['normalizeSource', 'sourceLabel', 'sourceMembers', 'matchesSourceFilter', 'groupIncidentsBySource']);
+  const lake = { source: 'lakecharles' }, sulphur = { source: 'sulphur' }, caddo = { source: 'caddo' };
+  assert.equal(ctx.matchesSourceFilter(lake, 'calcasieu'), true);
+  assert.equal(ctx.matchesSourceFilter(sulphur, 'calcasieu'), true);
+  assert.equal(ctx.matchesSourceFilter(caddo, 'calcasieu'), false);
+  assert.equal(ctx.matchesSourceFilter(sulphur, 'lakecharles'), false);
+  assert.equal(ctx.matchesSourceFilter(caddo, 'caddo'), true);
+  assert.equal(ctx.matchesSourceFilter(caddo, 'all'), true);
+  assert.match(ctx.sourceLabel('calcasieu'), /^Calcasieu .*24h delay/);
+  const grouped = ctx.groupIncidentsBySource([lake, sulphur, caddo]);
+  assert.equal(grouped.get('calcasieu').length, 2);
+  assert.equal(grouped.has('lakecharles'), false);
+  assert.equal(lake.source, 'lakecharles');
+});
+
 test('Sulphur is its own delayed source and cannot be labeled active or breaking', () => {
   const ctx = loadFunctions(['normalizeSource', 'sourceLabel', 'incidentActivityState', 'formatTime', 'incidentTimeLabel'], { UNIT_PULSE_THRESHOLD: 5 });
   assert.equal(ctx.normalizeSource('sulphur'), 'sulphur');
@@ -221,7 +240,7 @@ test('existing markers move, restyle, and refresh open details without duplicati
 
 function liveContext() {
   const requests = [];
-  const ctx = loadFunctions(['updateIncidents'], {
+  const ctx = loadFunctions(['sourceMembers', 'matchesSourceFilter', 'updateIncidents'], {
     liveRequestId: 0, currentSource: 'caddo', currentIncidents: [], sharedIncidentView: null,
     fetch: () => { const r = deferred(); requests.push(r); return r.promise; },
     sourceQueryParam: () => 'source=caddo', normalizeSource: s => s,

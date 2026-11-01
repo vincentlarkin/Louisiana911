@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en-US">
 <head>
-  <script defer src="/analytics.js?v=4.8.2"></script>
+  <script defer src="/analytics.js?v=4.8.3"></script>
   <meta charset="UTF-8">
   <script type="application/json" id="map-config">{}</script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -83,7 +83,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.9.3" />
+  <link rel="stylesheet" href="styles.css?v=4.9.4" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -361,11 +361,8 @@
         <button class="source-tab" type="button" data-source="neworleans" title="Show the latest published New Orleans calls for service">
           New Orleans <span class="daily-pill">Daily</span>
         </button>
-        <button class="source-tab" type="button" data-source="lakecharles" title="Lake Charles police closed calls — published with a 24-hour delay">
-          Lake Charles <span class="daily-pill">24h delay</span>
-        </button>
-        <button class="source-tab" type="button" data-source="sulphur" title="Sulphur police closed calls — published with a 24-hour delay">
-          Sulphur <span class="daily-pill">24h delay</span>
+        <button class="source-tab" type="button" data-source="calcasieu" title="Lake Charles and Sulphur police closed calls — published with a 24-hour delay">
+          Calcasieu <span class="daily-pill">24h delay</span>
         </button>
       </div>
 
@@ -1023,10 +1020,14 @@
       }
     }
     const sourceFromUrl = coverageSource || new URLSearchParams(window.location.search).get('source');
-    const supportedSources = new Set(['all', 'caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles', 'sulphur']);
+    const supportedSources = new Set(['all', 'caddo', 'batonrouge', 'lafayette', 'neworleans', 'calcasieu']);
     // Police-to-Citizen feeds: closed calls published after about 24 hours, never active.
-    const DELAYED_CLOSED_SOURCES = new Set(['lakecharles', 'sulphur']);
-    let currentSource = supportedSources.has(sourceFromUrl) ? sourceFromUrl : 'all';
+    const DELAYED_CLOSED_SOURCES = new Set(['lakecharles', 'sulphur', 'calcasieu']);
+    // Tabs that show more than one feed, and the feed names that open them.
+    const SOURCE_GROUPS = { calcasieu: ['lakecharles', 'sulphur'] };
+    const SOURCE_ALIASES = { lakecharles: 'calcasieu', sulphur: 'calcasieu' };
+    const initialSource = SOURCE_ALIASES[sourceFromUrl] || sourceFromUrl;
+    let currentSource = supportedSources.has(initialSource) ? initialSource : 'all';
     let currentLafayetteUnit = 'all'; // 'all' | 'police' | 'sheriff' | 'fire'
     let currentBatonRougeAgency = 'all'; // 'all' | 'law' | 'oss'
     let currentFilter = 'all';  // Agency filter
@@ -1188,7 +1189,7 @@
       return '#ffb830';
     }
 
-    const SOURCE_ORDER = ['caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles', 'sulphur'];
+    const SOURCE_ORDER = ['caddo', 'batonrouge', 'lafayette', 'neworleans', 'calcasieu'];
     const SOURCE_MAP_VIEWS = {
       caddo: { center: [32.5252, -93.7502], zoom: 11 },
       batonrouge: { center: [30.4515, -91.1871], zoom: 11 },
@@ -1196,6 +1197,7 @@
       neworleans: { center: [29.9511, -90.0715], zoom: 11 },
       lakecharles: { center: [30.2266, -93.2174], zoom: 12 },
       sulphur: { center: [30.2366, -93.3774], zoom: 12 },
+      calcasieu: { center: [30.2050, -93.2900], zoom: 11 },
       all: { center: [31.0, -92.3], zoom: 7 },
     };
 
@@ -1217,6 +1219,7 @@
       if (source === 'neworleans') return 'New Orleans (Daily)';
       if (source === 'lakecharles') return 'Lake Charles (24h delay)';
       if (source === 'sulphur') return 'Sulphur (24h delay)';
+      if (source === 'calcasieu') return 'Calcasieu (24h delay)';
       return 'Caddo';
     }
 
@@ -1263,14 +1266,14 @@
         ['batonrouge', []],
         ['lafayette', []],
         ['neworleans', []],
-        ['lakecharles', []],
-        ['sulphur', []],
+        ['calcasieu', []],
       ]);
       (incidents || []).forEach((incident) => {
         const source = normalizeSource(incident?.source);
-        if (!grouped.has(source)) grouped.set(source, []);
+        const group = SOURCE_ALIASES[source] || source;
+        if (!grouped.has(group)) grouped.set(group, []);
         incident.source = source;
-        grouped.get(source).push(incident);
+        grouped.get(group).push(incident);
       });
       return grouped;
     }
@@ -1356,10 +1359,13 @@
       return matchesAgencyFilter(incident, currentFilter);
     }
 
+    function sourceMembers(source) {
+      return SOURCE_GROUPS[source] || [normalizeSource(source)];
+    }
+
     function matchesSourceFilter(incident, source = currentSource) {
-      const selectedSource = normalizeSource(source);
       if (source === 'all') return true;
-      return normalizeSource(incident?.source) === selectedSource;
+      return sourceMembers(source).includes(normalizeSource(incident?.source));
     }
 
     // Combined filter - checks source, visible unit filters, and urgency.
@@ -2472,7 +2478,7 @@
           incident.source = normalizeSource(incident?.source);
         });
         if (currentSource !== 'all') {
-          allIncidents = allIncidents.filter((incident) => normalizeSource(incident?.source) === currentSource);
+          allIncidents = allIncidents.filter((incident) => matchesSourceFilter(incident, currentSource));
         }
         
         // Store all incidents
@@ -3324,7 +3330,8 @@
     }
 
     function applySourceFilter(source) {
-      const normalized = String(source || '').toLowerCase();
+      const requested = String(source || '').toLowerCase();
+      const normalized = SOURCE_ALIASES[requested] || requested;
       if (!supportedSources.has(normalized)) return;
       if (currentSource === normalized) {
         focusMapOnSourceSelection(normalized);
@@ -3592,7 +3599,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.9.3', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.9.4', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
@@ -3627,8 +3634,9 @@
     });
     syncAgencyFilterGroupsToSource();
     setViewMode(viewMode, { persist: false });
-    if (sourceFromUrl && supportedSources.has(sourceFromUrl) && !sharedIncidentView) {
-      const view = SOURCE_MAP_VIEWS[currentSource];
+    if (sourceFromUrl && supportedSources.has(initialSource) && !sharedIncidentView) {
+      // A city link (e.g. Lake Charles) opens its group's tab but keeps the city's view.
+      const view = SOURCE_MAP_VIEWS[sourceFromUrl] || SOURCE_MAP_VIEWS[currentSource];
       map.setView(view.center, view.zoom, { animate: false });
     }
     

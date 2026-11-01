@@ -163,6 +163,36 @@ class SulphurDatabaseTests(unittest.TestCase):
         self.assertTrue(all(row['source'] == 'sulphur' and row['is_active'] == 0 for row in rows))
         with app.app.test_request_context('/api/incidents/active?source=all'):
             self.assertEqual(len(app.get_active_incidents().get_json()), 300)
+        with app.app.test_request_context('/api/incidents/active?source=calcasieu'):
+            rows = app.get_active_incidents().get_json()
+        self.assertEqual(len(rows), 300)
+        self.assertEqual({row['source'] for row in rows}, {'sulphur', 'lakecharles'})
+
+    def test_calcasieu_history_covers_both_feeds_only(self):
+        conn = app.db_connect(row_factory=True)
+        for name, source in (('lake', 'lakecharles'), ('sul', 'sulphur'), ('cad', 'caddo')):
+            conn.execute('INSERT INTO incidents(hash, source, is_active, first_seen) VALUES (?,?,0,?)',
+                         (name, source, '2026-10-30T15:00:00+00:00'))
+        conn.commit()
+        bounds = app._central_date_bounds_utc('2026-10-30')
+        rows, total = app._query_history_candidates(conn, bounds, 'calcasieu', 10)
+        self.assertEqual(total, 2)
+        self.assertEqual({row['source'] for row in rows}, {'lakecharles', 'sulphur'})
+        self.assertEqual(app._query_history_candidates(conn, bounds, 'sulphur', 10)[1], 1)
+        conn.close()
+        with app.app.test_request_context('/api/incidents/history_counts?month=2026-10&source=calcasieu'), \
+                patch.object(app, '_history_ui_request_guard', return_value=None), \
+                patch.object(app, '_get_archive_dbs_for_month', return_value=[]):
+            counts = app.get_history_counts().get_json()['counts']
+        self.assertEqual(counts.get('2026-10-30'), 2)
+
+    def test_calcasieu_filter_and_refresh_label(self):
+        self.assertEqual(app._normalize_source_filter('calcasieu'), 'calcasieu')
+        self.assertEqual(app._normalize_source_filter('CALCASIEU'), 'calcasieu')
+        self.assertEqual(app._normalize_source_filter('bogus'), 'all')
+        self.assertEqual(app._latest_delayed_refresh_label(['Oct 30, 23:45 CDT', 'Oct 31, 00:04 CDT']), 'Oct 31, 00:04 CDT')
+        self.assertEqual(app._latest_delayed_refresh_label([None, 'Oct 30, 23:45 CDT']), 'Oct 30, 23:45 CDT')
+        self.assertIsNone(app._latest_delayed_refresh_label([None, None]))
 
 
 if __name__ == '__main__':

@@ -3073,11 +3073,26 @@ def background_scrape():
 VALID_SOURCES = {'caddo', 'lafayette', 'batonrouge', 'neworleans', 'lakecharles', 'sulphur'}
 
 
+# Source filters that cover more than one feed. Lake Charles and Sulphur are a
+# few miles apart in Calcasieu Parish, so the map shows them as one tab.
+SOURCE_FILTER_GROUPS = {'calcasieu': ('lakecharles', 'sulphur')}
+
+
 def _normalize_source_filter(value: str | None) -> str:
     s = (value or 'all').strip().lower()
     if s == 'all':
         return 'all'
-    return s if s in VALID_SOURCES else 'all'
+    return s if s in VALID_SOURCES or s in SOURCE_FILTER_GROUPS else 'all'
+
+
+def _source_filter_members(source_filter: str) -> tuple[str, ...]:
+    """The stored source names a (non-'all') filter matches."""
+    return SOURCE_FILTER_GROUPS.get(source_filter, (source_filter,))
+
+
+def _source_in_clause(source_filter: str) -> tuple[str, list[str]]:
+    members = _source_filter_members(source_filter)
+    return f"source IN ({', '.join('?' for _ in members)})", list(members)
 
 
 def _normalize_incident_source_for_read(source: str | None) -> str:
@@ -3117,7 +3132,7 @@ def _ensure_incidents_source_column(conn: sqlite3.Connection) -> bool:
 def _incident_matches_source_filter(incident: dict, source_filter: str) -> bool:
     if source_filter == 'all':
         return True
-    return _normalize_incident_source_for_read(incident.get('source')) == source_filter
+    return _normalize_incident_source_for_read(incident.get('source')) in _source_filter_members(source_filter)
 
 
 def _incident_location_label(incident: dict) -> str | None:
@@ -3714,10 +3729,13 @@ def get_active_incidents():
         elif source_filter == 'caddo':
             cursor.execute("SELECT * FROM incidents WHERE is_active = 1 AND (source = 'caddo' OR source IS NULL OR TRIM(source) = '') ORDER BY time DESC")
         else:
-            cursor.execute('SELECT * FROM incidents WHERE is_active = 1 AND source = ? ORDER BY time DESC', (source_filter,))
+            clause, members = _source_in_clause(source_filter)
+            cursor.execute(f'SELECT * FROM incidents WHERE is_active = 1 AND {clause} ORDER BY time DESC', members)
         incidents = [dict(row) for row in cursor.fetchall()]
         for delayed_source, adapter in DELAYED_CLOSED_CALL_SOURCES.items():
-            if not has_source_column or source_filter not in ('all', delayed_source):
+            if not has_source_column:
+                continue
+            if source_filter != 'all' and delayed_source not in _source_filter_members(source_filter):
                 continue
             # Latest includes a bounded recent slice of closed calls. Keep
             # is_active=0 so they are never counted as active and are available
@@ -3752,8 +3770,9 @@ def _query_history_candidates(conn, bounds, source_filter, candidate_limit, *, a
     if source_filter == 'caddo' and has_source:
         clauses.append("(source = 'caddo' OR source IS NULL OR TRIM(source) = '')")
     elif source_filter != 'all' and has_source:
-        clauses.append('source = ?')
-        args.append(source_filter)
+        clause, members = _source_in_clause(source_filter)
+        clauses.append(clause)
+        args.extend(members)
     where = ' AND '.join(clauses)
     # Count and page use the same snapshot even if the collector updates rows.
     if not conn.in_transaction:
@@ -3854,9 +3873,10 @@ def get_history_counts():
         elif not has_source_column:
             cursor.execute('SELECT first_seen FROM incidents WHERE 1 = 0')
         else:
+            clause, members = _source_in_clause(source_filter)
             cursor.execute(
-                'SELECT first_seen FROM incidents WHERE is_active = 0 AND first_seen >= ? AND first_seen < ? AND source = ?',
-                (start_utc, end_utc, source_filter)
+                f'SELECT first_seen FROM incidents WHERE is_active = 0 AND first_seen >= ? AND first_seen < ? AND {clause}',
+                (start_utc, end_utc, *members)
             )
         for row in cursor.fetchall():
             day = _central_date_key(row['first_seen'])
@@ -3884,9 +3904,10 @@ def get_history_counts():
                             (start_utc, end_utc)
                         )
                     else:
+                        clause, members = _source_in_clause(source_filter)
                         archive_cursor.execute(
-                            'SELECT first_seen FROM incidents WHERE first_seen >= ? AND first_seen < ? AND source = ?',
-                            (start_utc, end_utc, source_filter)
+                            f'SELECT first_seen FROM incidents WHERE first_seen >= ? AND first_seen < ? AND {clause}',
+                            (start_utc, end_utc, *members)
                         )
                 except sqlite3.OperationalError:
                     # Legacy archive DBs are Caddo-only and have no source column.
@@ -3995,6 +4016,25 @@ def get_stats():
         'byType': by_type
     })
 
+def _latest_delayed_refresh_label(labels) -> str | None:
+    """Newest of several 'Oct 30, 23:45 CDT' labels (the delayed adapters' format)."""
+    now = datetime.now(CENTRAL_TZ)
+    best = best_label = None
+    for label in labels:
+        if not label:
+            continue
+        try:
+            parsed = datetime.strptime(' '.join(label.split()[:3]), '%b %d, %H:%M').replace(year=now.year)
+        except ValueError:
+            best_label = best_label or label
+            continue
+        if parsed.month > now.month + 6:  # Late December seen in early January.
+            parsed = parsed.replace(year=now.year - 1)
+        if best is None or parsed > best:
+            best, best_label = parsed, label
+    return best_label
+
+
 @app.route('/api/status')
 def get_status():
     meta = meta_get_many([
@@ -4027,6 +4067,8 @@ def get_status():
         'lakecharles': meta.get('feed_refreshed_at_lakecharles') or feed_refreshed_by_source.get('lakecharles'),
         'sulphur': meta.get('feed_refreshed_at_sulphur') or feed_refreshed_by_source.get('sulphur'),
     }
+    refreshed_by_source['calcasieu'] = _latest_delayed_refresh_label(
+        refreshed_by_source.get(name) for name in SOURCE_FILTER_GROUPS['calcasieu'])
 
     return jsonify({
         # lastUpdate: UTC ISO timestamp of when we last processed/saved a scrape
