@@ -17,7 +17,8 @@ jobs:
   deploy:
     if: github.ref == 'refs/heads/main'
     timeout-minutes: 20
-    runs-on: ubuntu-latest
+    # Pinned: on ubuntu-latest (Ubuntu 26) sudo ignores -E, so the Tailscale v2 action loses its auth key.
+    runs-on: ubuntu-24.04
     steps:
       - name: Connect to the deploy network
         uses: tailscale/github-action@05c58255396c88c609919d571a8b117099c69020 # v2
