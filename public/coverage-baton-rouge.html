@@ -34,7 +34,15 @@
     "inLanguage": "en-US",
     "isPartOf": { "@id": "https://louisiana911.com/#website" },
     "about": { "@type": "Place", "name": "Baton Rouge and East Baton Rouge Parish, Louisiana" },
-    "mainEntity": { "@type": "Dataset", "name": "City-Parish Baton Rouge Traffic Incidents", "url": "https://city.brla.gov/traffic/incidents.asp" }
+    "mainEntity": {
+      "@type": "Dataset",
+      "name": "City-Parish Baton Rouge Traffic Incidents",
+      "description": "Public list of active traffic incidents in Baton Rouge and East Baton Rouge Parish, published by the City of Baton Rouge and Parish of East Baton Rouge. Louisiana911 reads this public feed and maps the incidents.",
+      "url": "https://city.brla.gov/traffic/incidents.asp",
+      "creator": { "@type": "GovernmentOrganization", "name": "City of Baton Rouge and Parish of East Baton Rouge", "url": "https://www.brla.gov/" },
+      "isAccessibleForFree": true,
+      "spatialCoverage": { "@type": "Place", "name": "East Baton Rouge Parish, Louisiana" }
+    }
   }
   </script>
   <script type="application/ld+json">
