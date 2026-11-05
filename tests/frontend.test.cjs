@@ -407,8 +407,12 @@ test('vector styles share a renderer and unavailable WebGL falls back', () => {
   const layer = { addTo() {}, getMaplibreMap: () => renderer };
   const ctx = loadFunctions(['showVectorBasemap', 'fallBackToRaster'], {
     cartoKey: 'test-key', vectorFailed: false, vectorLayer: null, vectorMode: null,
-    vectorLoadTimer: null, vectorStyles: { dark: 'dark-style', light: 'light-style' },
-    cartoAttribution: 'credits', cartoRequest: url => ({ url }),
+    vectorLoadTimer: null, vectorProvider: null, oldMapStyle: false,
+    BASEMAP_PROVIDERS: {
+      colorful: { styles: { dark: 'dark-style', light: 'light-style' }, attribution: 'credits' },
+      carto: { styles: { dark: 'carto-dark', light: 'carto-light' }, attribution: 'carto credits' },
+    },
+    cartoRequest: url => ({ url }),
     L: { maplibreGL() { creates++; return layer; } },
     map: { hasLayer: () => true, removeLayer() {} },
     setTimeout: () => 1, clearTimeout() {}, queueMicrotask: fn => fn(),
@@ -426,6 +430,38 @@ test('vector styles share a renderer and unavailable WebGL falls back', () => {
   ctx.L.maplibreGL = () => { throw new Error('WebGL unavailable'); };
   assert.equal(ctx.showVectorBasemap('dark'), false);
   assert.equal(ctx.vectorFailed, true);
+});
+
+test('colorful maps are the default and old map style switches providers', () => {
+  const created = [];
+  const removed = [];
+  const makeLayer = (options) => ({ options, addTo() {},
+    getMaplibreMap: () => ({ on() {}, getCanvas: () => ({ addEventListener() {} }), setStyle() {} }) });
+  const ctx = loadFunctions(['showVectorBasemap'], {
+    cartoKey: '', vectorFailed: false, vectorLayer: null, vectorMode: null, vectorLoadTimer: null,
+    vectorProvider: null, oldMapStyle: false,
+    BASEMAP_PROVIDERS: {
+      colorful: { styles: { dark: 'colorful-dark', light: 'colorful' }, attribution: 'VersaTiles' },
+      carto: { styles: { dark: 'carto-dark', light: 'carto-light' }, attribution: 'CARTO' },
+    },
+    cartoRequest: url => ({ url }),
+    L: { maplibreGL(options) { const layer = makeLayer(options); created.push(layer); return layer; } },
+    map: { hasLayer: () => true, removeLayer(layer) { removed.push(layer); } },
+    setTimeout: () => 1, clearTimeout() {}, fallBackToRaster() {},
+  });
+  // Colorful needs no key.
+  assert.equal(ctx.showVectorBasemap('light'), true);
+  assert.equal(created[0].options.style, 'colorful');
+  assert.equal(ctx.vectorProvider, 'colorful');
+  // Old map style without a CARTO key can't load; it falls back to raster.
+  ctx.oldMapStyle = true;
+  assert.equal(ctx.showVectorBasemap('light'), false);
+  ctx.cartoKey = 'test-key';
+  assert.equal(ctx.showVectorBasemap('dark'), true);
+  assert.equal(removed[0], created[0]);
+  assert.equal(created[1].options.style, 'carto-dark');
+  assert.equal(created[1].options.attributionControl.customAttribution, 'CARTO');
+  assert.equal(ctx.vectorProvider, 'carto');
 });
 
 test('street labels appear at incident focus zoom with readable dark and light colors', () => {
