@@ -135,7 +135,7 @@
       <button class="info-btn" type="button" onclick="toggleInfoPanel()" title="About" aria-label="About">i</button>
       <button class="menu-btn" type="button" onclick="toggleInfoPanel()" aria-label="Menu: settings, reports and about">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
-        Menu
+        <span class="menu-btn-text">Menu</span>
       </button>
     </div>
   </header>
@@ -1494,7 +1494,7 @@
     function plainUnitText(incident) {
       const units = Number(incident?.units);
       if (!Number.isFinite(units) || units <= 0) return '';
-      return incidentUnitLabel(incident);
+      return incidentUnitLabel(incident).replace(/(\d) /g, '$1\u00a0'); // keep "2 units" on one line
     }
 
     function _chicagoParts(date) {
