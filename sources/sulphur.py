@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from sources.p2c_time import repair_fall_back_start
+
 BASE_URL = 'https://sulphur.policetocitizen.com'
 PUBLIC_URL = BASE_URL + '/cadcalls'
 AGENCY_CODE = 'SPD'
@@ -54,6 +56,7 @@ def _normalize_row(row, *, now):
     event_id = _text(row.get('IncidentId'))
     started = _timestamp(row.get('StartTime'))
     ended = _timestamp(row.get('EndTime'))
+    started = repair_fall_back_start(started, ended, CENTRAL_TZ)
     nature = _text(row.get('Nature'))
     if not event_id or not started or not ended or not nature or ended < started:
         raise ValueError('Incomplete Sulphur closed call')

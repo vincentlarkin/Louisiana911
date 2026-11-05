@@ -66,6 +66,23 @@ class LakeCharlesAdapterTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.normalize(**changes)
 
+    def test_fall_back_hour_offset_mixup_is_repaired_not_fatal(self):
+        # Real feed record from 2026-11-01: started 1:56 AM CDT, closed 1:12 AM CST,
+        # but published with -06:00 on both, so it looked like it ended first.
+        now = datetime(2026, 11, 3, 12, tzinfo=timezone.utc)
+        row = {**CALL, 'IncidentId': '2611010073', 'StartTime': '2026-11-01T01:56:53-06:00',
+               'EndTime': '2026-11-01T01:12:52-06:00', 'Nature': 'L-NOISE DISTURBANCE'}
+        incident = lakecharles._normalize_row(row, now=now)
+        self.assertEqual(incident['occurred_at'], '2026-11-01T06:56:53+00:00')
+        self.assertEqual(incident['time'], '0156')
+
+    def test_end_before_start_outside_the_repeated_hour_still_fails(self):
+        for start, end in (('2026-09-03T10:05:00-05:00', '2026-09-03T09:20:00-05:00'),
+                           # Repeated hour, but a 50-minute gap can't be the one-hour mix-up.
+                           ('2026-11-01T01:59:00-06:00', '2026-11-01T00:09:00-06:00')):
+            with self.assertRaises(ValueError):
+                self.normalize(StartTime=start, EndTime=end)
+
     def session(self, pages):
         session = Mock()
         session.__enter__ = Mock(return_value=session)
