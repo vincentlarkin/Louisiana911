@@ -83,7 +83,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.10.0" />
+  <link rel="stylesheet" href="styles.css?v=4.11.0" />
 </head>
 <body class="map-dark">
   <header class="header">
@@ -153,6 +153,16 @@
           </label>
           <label class="toggle-switch">
             <input type="checkbox" id="setting-circle-markers">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="setting-item">
+          <label class="setting-label" for="setting-old-map-style">
+            <span class="setting-title">Old map style</span>
+            <span class="setting-desc">Use the plain gray street maps from before November 2026 instead of the colorful ones.</span>
+          </label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="setting-old-map-style">
             <span class="toggle-slider"></span>
           </label>
         </div>
@@ -586,12 +596,28 @@
     const basemapButtons = Array.from(document.querySelectorAll('[data-basemap]'));
     const storedBasemapMode = preferences.get('louisiana911BasemapMode');
     let basemapMode = storedBasemapMode === 'light' ? 'light' : 'dark';
-    const vectorStyles = {
-      dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-      light: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+    // VersaTiles Colorful is the default (free, no key). "Old map style" in
+    // Settings brings back the plain CARTO maps used before November 2026.
+    const BASEMAP_PROVIDERS = {
+      colorful: {
+        styles: {
+          dark: 'https://tiles.versatiles.org/assets/styles/colorful-dark/style.json',
+          light: 'https://tiles.versatiles.org/assets/styles/colorful/style.json',
+        },
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://versatiles.org">VersaTiles</a>',
+      },
+      carto: {
+        styles: {
+          dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+          light: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+        },
+        attribution: cartoAttribution,
+      },
     };
+    let oldMapStyle = preferences.get('louisiana911OldMapStyle') === 'true';
     let vectorLayer = null;
     let vectorMode = null;
+    let vectorProvider = null;
     let vectorFailed = false;
     let vectorLoadTimer = null;
 
@@ -665,12 +691,20 @@
     }
 
     function showVectorBasemap(mode) {
-      if (!cartoKey || vectorFailed || typeof L.maplibreGL !== 'function') return false;
+      const provider = oldMapStyle ? 'carto' : 'colorful';
+      if ((provider === 'carto' && !cartoKey) || vectorFailed || typeof L.maplibreGL !== 'function') return false;
       try {
+        if (vectorLayer && vectorProvider !== provider) {
+          // Attribution and request rules belong to the provider, so start fresh.
+          map.removeLayer(vectorLayer);
+          vectorLayer = null;
+          vectorMode = null;
+        }
         if (!vectorLayer) {
+          vectorProvider = provider;
           vectorLayer = L.maplibreGL({
-            pane: 'base', style: vectorStyles[mode], interactive: false,
-            attributionControl: { customAttribution: cartoAttribution },
+            pane: 'base', style: BASEMAP_PROVIDERS[provider].styles[mode], interactive: false,
+            attributionControl: { customAttribution: BASEMAP_PROVIDERS[provider].attribution },
             transformRequest: cartoRequest,
           });
           vectorLayer.addTo(map);
@@ -679,15 +713,18 @@
           renderer.getCanvas().addEventListener('webglcontextlost', fallBackToRaster);
           renderer.on('style.load', () => {
             clearTimeout(vectorLoadTimer);
+            // These tweaks target CARTO's layer names; Colorful is used as designed.
+            if (vectorProvider !== 'carto') return;
             improveStreetLabels(renderer, vectorMode);
             softenBasemapDetails(renderer, vectorMode);
           });
         } else if (vectorMode !== mode) {
-          vectorLayer.getMaplibreMap().setStyle(vectorStyles[mode]);
+          vectorLayer.getMaplibreMap().setStyle(BASEMAP_PROVIDERS[provider].styles[mode]);
         } else {
           return true;
         }
         vectorMode = mode;
+        vectorProvider = provider;
         clearTimeout(vectorLoadTimer);
         vectorLoadTimer = setTimeout(fallBackToRaster, 15000);
         return true;
@@ -706,7 +743,7 @@
         if (layer !== nextLayer && map.hasLayer(layer)) map.removeLayer(layer);
       });
       if (!map.hasLayer(nextLayer)) nextLayer.addTo(map);
-      map.getContainer().dataset.basemapProvider = useVector ? 'carto-vector' : (cartoLayers ? 'carto' : 'osm');
+      map.getContainer().dataset.basemapProvider = useVector ? `${vectorProvider}-vector` : (cartoLayers ? 'carto' : 'osm');
 
       basemapMode = nextMode;
       map.getContainer().dataset.basemapMode = nextMode;
@@ -722,6 +759,17 @@
     basemapButtons.forEach(button => {
       button.addEventListener('click', () => setBasemapMode(button.dataset.basemap));
     });
+
+    const oldMapStyleToggle = document.getElementById('setting-old-map-style');
+    if (oldMapStyleToggle) {
+      oldMapStyleToggle.checked = oldMapStyle;
+      oldMapStyleToggle.addEventListener('change', () => {
+        oldMapStyle = oldMapStyleToggle.checked;
+        preferences.set('louisiana911OldMapStyle', String(oldMapStyle));
+        vectorFailed = false; // give the newly chosen provider a fresh try
+        setBasemapMode(basemapMode, { persist: false });
+      });
+    }
 
     function ensureMapTilesLoaded() {
       setBasemapMode(basemapMode, { persist: false });
@@ -3973,7 +4021,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.10.0', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.11.0', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
