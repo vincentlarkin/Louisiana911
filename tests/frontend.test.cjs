@@ -248,6 +248,7 @@ function liveContext() {
     getFilteredIncidents: items => items,
     document: { getElementById: () => ({ classList: { contains: () => false } }) },
     setMapMarkers: items => { ctx.rendered = items; }, renderIncidentList() {},
+    mobileStatusState: {}, renderMobileStatus() {},
   });
   return { ctx, requests };
 }
@@ -601,4 +602,52 @@ test('map severity matches the shared cases used by report counts', () => {
   for (const { description, agency, severity } of cases) {
     assert.equal(ctx.getSeverity({ description, agency }), severity, `${description} / ${agency}`);
   }
+});
+
+test('plain wording: mixed case, spelled-out agencies and areas, plain severity words', () => {
+  const ctx = loadFunctions(['normalizeSource', 'getIncidentAgencyUnits', 'formatAgencyDisplay', 'plainCase',
+    'agencyPlainName', 'areaPlainName', 'severityLabel']);
+  assert.equal(ctx.plainCase('CADDO EMS EVENT'), 'Caddo EMS Event');
+  assert.equal(ctx.plainCase('N MARKET ST & I-49'), 'N Market St & I-49');
+  assert.equal(ctx.agencyPlainName({ source: 'caddo', agency: 'SPD' }), 'Shreveport Police');
+  assert.equal(ctx.agencyPlainName({ source: 'sulphur', agency: 'SPD' }), 'Sulphur Police');
+  assert.equal(ctx.agencyPlainName({ source: 'caddo', agency: 'CFD3' }), 'Caddo Fire District 3');
+  assert.equal(ctx.agencyPlainName({ source: 'lafayette', agency: 'POLICE FIRE' }), 'Police / Fire');
+  assert.equal(ctx.agencyPlainName({ source: 'caddo', agency: 'NCMC' }), 'NCMC');
+  assert.equal(ctx.areaPlainName({ source: 'caddo', municipality: 'SHV' }), 'Shreveport');
+  assert.equal(ctx.areaPlainName({ source: 'caddo', municipality: 'CADD' }), '');
+  assert.equal(ctx.areaPlainName({ source: 'lafayette', municipality: 'LAFAYETTE' }), 'Lafayette');
+  assert.equal(ctx.severityLabel('high'), 'Serious');
+  assert.equal(ctx.severityLabel('low'), 'Minor');
+});
+
+test('friendly times are 12-hour Central with Today / Yesterday / date', () => {
+  const ctx = loadFunctions(['_chicagoParts', 'friendlyTimeLabel']);
+  const now = new Date('2026-11-05T02:40:00Z'); // 8:40 PM CST, Nov 4
+  assert.deepEqual({ ...ctx.friendlyTimeLabel({ source: 'caddo', time: '2032' }, now) }, { short: '8:32 PM', long: 'Today at 8:32 PM' });
+  assert.equal(ctx.friendlyTimeLabel({ source: 'caddo', time: '0005' }, now).short, '12:05 AM');
+  // Undated live feed showing a clock later than now happened yesterday.
+  assert.equal(ctx.friendlyTimeLabel({ source: 'caddo', time: '2350' }, now).short, 'Yesterday 11:50 PM');
+  assert.equal(ctx.friendlyTimeLabel({ source: 'sulphur', time: '2345', first_seen: '2026-10-31T04:45:43Z' }, now).short, 'Oct 30, 11:45 PM');
+  assert.equal(ctx.friendlyTimeLabel({ source: 'neworleans', time: '0554', first_seen: '2026-11-04T11:54:00Z' }, now).long, 'Today at 5:54 AM');
+});
+
+test('near me keeps calls inside the circle, closest first', () => {
+  const ctx = loadFunctions(['distanceMiles', 'incidentsNear', 'formatMiles'], {
+    isUnknownLocation: incident => incident.street === 'Unknown',
+    incidentCoordinatePair: incident => Number.isFinite(incident.latitude) ? [incident.latitude, incident.longitude] : null,
+  });
+  const center = [32.5, -93.75];
+  const rows = ctx.incidentsNear([
+    { id: 'far', latitude: 32.6, longitude: -93.75, street: 'A' },          // ~6.9 mi
+    { id: 'near', latitude: 32.505, longitude: -93.75, street: 'B' },       // ~0.35 mi
+    { id: 'mid', latitude: 32.52, longitude: -93.75, street: 'C' },         // ~1.4 mi
+    { id: 'nomap', latitude: null, longitude: null, street: 'D' },
+    { id: 'unknown', latitude: 32.5, longitude: -93.75, street: 'Unknown' },
+  ], center, 3);
+  assert.deepEqual(rows.map(row => row.incident.id), ['near', 'mid']);
+  assert.ok(Math.abs(rows[1].miles - 1.38) < 0.05);
+  assert.equal(ctx.incidentsNear([], [NaN, 1], 3).length, 0);
+  assert.equal(ctx.formatMiles(0.05), 'Under 0.1 mi');
+  assert.equal(ctx.formatMiles(2.345), '2.3 mi');
 });
