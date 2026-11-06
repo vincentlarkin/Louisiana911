@@ -1,0 +1,30 @@
+# VersaTiles server for maps.louisiana911.com: Louisiana-only basemap tiles plus
+# the VersaTiles styles, fonts and sprites, at the same paths as
+# tiles.versatiles.org so the site can switch hosts by rewriting the origin.
+server:
+  ip: 0.0.0.0
+  port: 8080
+  # Cloudflare keeps its own copy; this is what browsers and Cloudflare see.
+  cache_control: "public, max-age=86400"
+
+cors:
+  allowed_origins:
+    - "https://louisiana911.com"
+  max_age_seconds: 86400
+
+extra_response_headers:
+  # Lets the site measure tile timings in the browser.
+  Timing-Allow-Origin: "https://louisiana911.com"
+
+tiles:
+  # Names must stay "osm" and "landcover-vectors": the Colorful styles request
+  # /tiles/osm/... and /tiles/landcover-vectors/....
+  - name: osm
+    src: "/data/osm.versatiles"
+  - name: landcover-vectors
+    src: "/data/landcover-vectors.versatiles"
+
+static:
+  # Styles, fonts and sprites bundled in the versatiles-frontend image.
+  - src: "/app/frontend-dev.br.tar"
+    prefix: "/"

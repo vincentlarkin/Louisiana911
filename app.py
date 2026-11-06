@@ -827,13 +827,44 @@ def _carto_basemap_key():
         return ''
 
 
+UPSTREAM_MAP_TILE_HOST = 'https://tiles.versatiles.org'
+
+
+def _map_tile_host():
+    """Origin of our own copy of the VersaTiles server, or '' to use the public one.
+
+    Set LOUISIANA911_MAP_TILE_HOST (for example https://maps.louisiana911.com)
+    once the self-hosted Louisiana tiles are live. Only a bare https origin is
+    accepted, so a typo cannot point visitors' browsers at an unexpected page.
+    """
+    value = os.environ.get('LOUISIANA911_MAP_TILE_HOST', '').strip().rstrip('/')
+    if not value:
+        return ''
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        parts = None
+    if (not parts or parts.scheme != 'https' or not parts.hostname
+            or parts.path or parts.query or parts.fragment or parts.username or parts.password):
+        log(f"[MAP] Ignoring LOUISIANA911_MAP_TILE_HOST={value!r}: expected an https origin such as https://maps.example.com")
+        return ''
+    return f"https://{parts.netloc.lower()}"
+
+
 def _read_map_index_html():
     index_path = os.path.join(app.root_path, 'public', 'index.html')
     with open(index_path, 'r', encoding='utf-8') as index_file:
         index_html = index_file.read()
     # Browser basemap keys are intentionally public; keep deployment config out of git.
     key = _carto_basemap_key()
-    config = json.dumps({'cartoKey': key}, ensure_ascii=True).replace('<', '\\u003c')
+    tile_host = _map_tile_host()
+    config = json.dumps({'cartoKey': key, 'tileHost': tile_host}, ensure_ascii=True).replace('<', '\\u003c')
+    if tile_host:
+        index_html = index_html.replace(
+            f'<link rel="preconnect" href="{UPSTREAM_MAP_TILE_HOST}" crossorigin>',
+            f'<link rel="preconnect" href="{tile_host}" crossorigin>',
+            1,
+        )
     return index_html.replace(
         '<script type="application/json" id="map-config">{}</script>',
         f'<script type="application/json" id="map-config">{config}</script>',

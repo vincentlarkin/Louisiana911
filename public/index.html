@@ -634,6 +634,53 @@
       return { url: requestUrl.href };
     }
 
+    // Our own copy of the VersaTiles server, served through Cloudflare close to
+    // Louisiana. Requests for tiles.versatiles.org are rewritten to it. If it
+    // fails, the map falls back to the public server, and only then to raster.
+    const VERSATILES_ORIGIN = 'https://tiles.versatiles.org';
+    const tileHost = /^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(String(mapConfig.tileHost || '')) ? mapConfig.tileHost : '';
+    let useTileHost = Boolean(tileHost);
+    let tileHostTileLoaded = false;
+    let tileHostTileErrors = 0;
+
+    function basemapRequest(url) {
+      const requestUrl = new URL(url);
+      if (useTileHost && requestUrl.origin === VERSATILES_ORIGIN) {
+        return { url: tileHost + requestUrl.pathname + requestUrl.search };
+      }
+      return cartoRequest(url);
+    }
+
+    // Leave our copy for the public VersaTiles server, keeping the vector map.
+    function fallBackFromTileHost() {
+      if (!useTileHost || vectorProvider !== 'colorful') return false;
+      useTileHost = false;
+      clearTimeout(vectorLoadTimer);
+      console.warn('Self-hosted map tiles unavailable; using tiles.versatiles.org');
+      queueMicrotask(() => {
+        if (vectorLayer && map.hasLayer(vectorLayer)) map.removeLayer(vectorLayer);
+        vectorLayer = null;
+        vectorMode = null;
+        setBasemapMode(basemapMode, { persist: false });
+      });
+      return true;
+    }
+
+    function handleBasemapError(event) {
+      if (event?.sourceId || event?.tile) {
+        // A missing tile (outside the Louisiana extract, or a brief network
+        // blip) leaves a gap; it is no reason to abandon the map. Our copy
+        // failing every tile before any loads is.
+        if (useTileHost && !tileHostTileLoaded && ++tileHostTileErrors >= 6) fallBackFromTileHost();
+        return;
+      }
+      if (!fallBackFromTileHost()) fallBackToRaster();
+    }
+
+    function handleBasemapLoadTimeout() {
+      if (!fallBackFromTileHost()) fallBackToRaster();
+    }
+
     function fallBackToRaster() {
       if (vectorFailed) return;
       vectorFailed = true;
@@ -709,11 +756,14 @@
           vectorLayer = L.maplibreGL({
             pane: 'base', style: BASEMAP_PROVIDERS[provider].styles[mode], interactive: false,
             attributionControl: { customAttribution: BASEMAP_PROVIDERS[provider].attribution },
-            transformRequest: cartoRequest,
+            transformRequest: basemapRequest,
           });
           vectorLayer.addTo(map);
           const renderer = vectorLayer.getMaplibreMap();
-          renderer.on('error', fallBackToRaster);
+          renderer.on('error', handleBasemapError);
+          renderer.on('data', (event) => {
+            if (event.dataType === 'source' && event.tile) tileHostTileLoaded = true;
+          });
           renderer.getCanvas().addEventListener('webglcontextlost', fallBackToRaster);
           renderer.on('style.load', () => {
             clearTimeout(vectorLoadTimer);
@@ -730,7 +780,7 @@
         vectorMode = mode;
         vectorProvider = provider;
         clearTimeout(vectorLoadTimer);
-        vectorLoadTimer = setTimeout(fallBackToRaster, 15000);
+        vectorLoadTimer = setTimeout(handleBasemapLoadTimeout, 15000);
         return true;
       } catch {
         fallBackToRaster();
