@@ -629,7 +629,8 @@
     // Louisiana. Requests for tiles.versatiles.org are rewritten to it. If it
     // fails, the map falls back to the public server, and only then to raster.
     const VERSATILES_ORIGIN = 'https://tiles.versatiles.org';
-    const tileHost = /^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(String(mapConfig.tileHost || '')) ? mapConfig.tileHost : '';
+    // An https origin with an optional path prefix, e.g. https://louisiana911.com/basemap.
+    const tileHost = /^https:\/\/[a-z0-9.-]+(:\d+)?(\/[A-Za-z0-9._~-]+)*$/i.test(String(mapConfig.tileHost || '')) ? mapConfig.tileHost : '';
     let useTileHost = Boolean(tileHost);
     let tileHostTileLoaded = false;
     let tileHostTileErrors = 0;

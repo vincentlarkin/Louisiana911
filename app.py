@@ -830,12 +830,16 @@ def _carto_basemap_key():
 UPSTREAM_MAP_TILE_HOST = 'https://tiles.versatiles.org'
 
 
-def _map_tile_host():
-    """Origin of our own copy of the VersaTiles server, or '' to use the public one.
+_MAP_TILE_PATH_RE = re.compile(r'(?:/[A-Za-z0-9._~-]+)*')
 
-    Set LOUISIANA911_MAP_TILE_HOST (for example https://maps.louisiana911.com)
-    once the self-hosted Louisiana tiles are live. Only a bare https origin is
-    accepted, so a typo cannot point visitors' browsers at an unexpected page.
+
+def _map_tile_host():
+    """Base URL of our own copy of the VersaTiles server, or '' to use the public one.
+
+    Set LOUISIANA911_MAP_TILE_HOST to an https origin with an optional path
+    prefix, for example https://louisiana911.com/basemap (served by the site's
+    nginx) or https://maps.example.com. Anything else is ignored, so a typo
+    cannot point visitors' browsers at an unexpected page.
     """
     value = os.environ.get('LOUISIANA911_MAP_TILE_HOST', '').strip().rstrip('/')
     if not value:
@@ -845,10 +849,19 @@ def _map_tile_host():
     except ValueError:
         parts = None
     if (not parts or parts.scheme != 'https' or not parts.hostname
-            or parts.path or parts.query or parts.fragment or parts.username or parts.password):
-        log(f"[MAP] Ignoring LOUISIANA911_MAP_TILE_HOST={value!r}: expected an https origin such as https://maps.example.com")
+            or not _MAP_TILE_PATH_RE.fullmatch(parts.path or '')
+            or parts.query or parts.fragment or parts.username or parts.password):
+        log(f"[MAP] Ignoring LOUISIANA911_MAP_TILE_HOST={value!r}: expected an https URL such as https://louisiana911.com/basemap")
         return ''
-    return f"https://{parts.netloc.lower()}"
+    return f"https://{parts.netloc.lower()}{parts.path}"
+
+
+def _map_tile_preconnect(tile_host: str) -> str:
+    """The preconnect tag for our tile host, or '' when it is this site."""
+    origin_host = urlsplit(tile_host).netloc
+    if origin_host == CANONICAL_SITE_HOST:
+        return ''
+    return f'<link rel="preconnect" href="https://{origin_host}" crossorigin>'
 
 
 _asset_fingerprints: dict[str, tuple[float, str]] = {}
@@ -893,7 +906,7 @@ def _read_map_index_html():
     if tile_host:
         index_html = index_html.replace(
             f'<link rel="preconnect" href="{UPSTREAM_MAP_TILE_HOST}" crossorigin>',
-            f'<link rel="preconnect" href="{tile_host}" crossorigin>',
+            _map_tile_preconnect(tile_host),
             1,
         )
     return index_html.replace(

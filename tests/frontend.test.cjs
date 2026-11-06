@@ -957,3 +957,19 @@ test('basemap skips tile fades and pulses pause while the map moves', () => {
   const css = require('node:fs').readFileSync(path.join(__dirname, '../public/styles.css'), 'utf8');
   assert.match(css, /\.map-moving \.unit-count-pulse \{\s*animation-play-state: paused;/);
 });
+
+test('self-hosted tiles can live under a path on this site', () => {
+  const ctx = loadFunctions(['cartoRequest', 'basemapRequest'], {
+    URL, VERSATILES_ORIGIN: 'https://tiles.versatiles.org', tileHost: 'https://louisiana911.com/basemap',
+    useTileHost: true, cartoKey: '',
+  });
+  assert.equal(ctx.basemapRequest('https://tiles.versatiles.org/tiles/osm/11/490/828').url,
+    'https://louisiana911.com/basemap/tiles/osm/11/490/828');
+  assert.equal(ctx.basemapRequest('https://tiles.versatiles.org/assets/glyphs/noto_sans_regular/0-255.pbf').url,
+    'https://louisiana911.com/basemap/assets/glyphs/noto_sans_regular/0-255.pbf');
+  const check = /const tileHost = (\/.*\/i)\.test/.exec(html);
+  const pattern = eval(check[1]);
+  assert.ok(pattern.test('https://louisiana911.com/basemap'));
+  assert.ok(!pattern.test('https://louisiana911.com/basemap?x=1'));
+  assert.ok(!pattern.test('https://louisiana911.com/base map'));
+});

@@ -1,6 +1,7 @@
-# Louisiana map tile server for maps.louisiana911.com.
+# Louisiana map tile server, served by the site's nginx at /basemap/.
 # MAP_TILES_DIR holds config.yaml and the two .versatiles files written by
-# update-map-tiles.sh. Cloudflare Tunnel routes maps.louisiana911.com here.
+# update-map-tiles.sh. The container joins nginx's Docker network and
+# publishes no port of its own.
 services:
   louisiana911-maps:
     # Pinned; bump deliberately (see README.md, "Upgrading").
@@ -9,6 +10,11 @@ services:
     entrypoint: ["/sbin/tini", "--", "/app/versatiles", "serve", "-c", "/data/config.yaml"]
     volumes:
       - ${MAP_TILES_DIR:?set MAP_TILES_DIR}:/data:ro
-    ports:
-      - "8095:8080"
+    networks:
+      - web
     restart: unless-stopped
+
+networks:
+  web:
+    external: true
+    name: ${MAP_TILES_NETWORK:-ix-my-website_default}

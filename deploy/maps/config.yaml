@@ -7,6 +7,8 @@ server:
   # Cloudflare keeps its own copy; this is what browsers and Cloudflare see.
   cache_control: "public, max-age=86400"
 
+# Served at https://louisiana911.com/basemap/ (same origin, so CORS only
+# matters if another site points at these tiles).
 cors:
   allowed_origins:
     - "https://louisiana911.com"
@@ -25,6 +27,10 @@ tiles:
     src: "/data/landcover-vectors.versatiles"
 
 static:
-  # Styles, fonts and sprites bundled in the versatiles-frontend image.
+  # The Colorful style files, refreshed by update-map-tiles.sh. The bundled
+  # frontend builds styles in JavaScript and ships no style.json.
+  - src: "/data/static"
+    prefix: "/"
+  # Fonts and sprites bundled in the versatiles-frontend image.
   - src: "/app/frontend-dev.br.tar"
     prefix: "/"
