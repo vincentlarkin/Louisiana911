@@ -2676,6 +2676,15 @@
       return true;
     }
 
+    // A request that never answers would stall polling for the rest of the
+    // visit. Abort it instead; the abort also covers reading the body.
+    const POLL_REQUEST_TIMEOUT_MS = 30000;
+    function fetchWithTimeout(url, options = {}) {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), POLL_REQUEST_TIMEOUT_MS);
+      return fetch(url, { ...options, signal: controller.signal });
+    }
+
     // Update incidents
     let liveRequestId = 0;
     async function updateIncidents() {
@@ -2684,10 +2693,10 @@
       const requestStartedAt = Date.now();
       let httpStatus = 0;
       try {
-        let response = await fetch(`api/incidents/active?${sourceQueryParam()}`);
+        let response = await fetchWithTimeout(`api/incidents/active?${sourceQueryParam()}`);
         if (!response.ok && requestedSource !== 'all') {
           // Backward-compat fallback for deployments where source-param filtering is unavailable.
-          response = await fetch('api/incidents/active?source=all');
+          response = await fetchWithTimeout('api/incidents/active?source=all');
         }
         httpStatus = response.status || 0;
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -2959,7 +2968,7 @@
     // Update last update time
     async function updateStatus() {
       try {
-        const response = await fetch('api/status');
+        const response = await fetchWithTimeout('api/status');
         const status = await response.json();
 
         const el = document.getElementById('last-update');
@@ -3847,7 +3856,7 @@
       if (!force && nearbyIncidentsCache.length && Date.now() - nearbyFetchedAt < 55000) return true;
       const requestId = ++nearbyRequest;
       try {
-        const response = await fetch('api/incidents/active?source=all');
+        const response = await fetchWithTimeout('api/incidents/active?source=all');
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const rows = await response.json();
         if (requestId !== nearbyRequest) return false;
@@ -4119,19 +4128,29 @@
     // Background tabs skip polls and catch up as soon as they are shown again.
     let lastPollAt = Date.now();
     let pollTimer = null;
+    // Only one poll runs at a time; the running poll schedules the next one.
+    let pollInFlight = false;
     async function pollLoop() {
+      if (pollInFlight) return;
       clearTimeout(pollTimer);
       if (document.hidden) {
         pollTimer = setTimeout(pollLoop, pollIntervalMs);
         return;
       }
+      pollInFlight = true;
       lastPollAt = Date.now();
-      await updateIncidents();
-      const nextInterval = await updateStatus();
-      if (typeof nextInterval === 'number' && Number.isFinite(nextInterval)) {
-        pollIntervalMs = Math.max(60000, Math.round(nextInterval));
+      try {
+        await updateIncidents();
+        const nextInterval = await updateStatus();
+        if (typeof nextInterval === 'number' && Number.isFinite(nextInterval)) {
+          pollIntervalMs = Math.max(60000, Math.round(nextInterval));
+        }
+      } catch (error) {
+        console.error('Poll failed:', error);
+      } finally {
+        pollInFlight = false;
+        pollTimer = setTimeout(pollLoop, pollIntervalMs);
       }
-      pollTimer = setTimeout(pollLoop, pollIntervalMs);
     }
 
     document.addEventListener('visibilitychange', () => {
