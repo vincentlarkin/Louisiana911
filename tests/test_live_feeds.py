@@ -136,3 +136,61 @@ class LiveLifecycleTests(unittest.TestCase):
                 self.assertEqual(app._query_history_candidates(conn, app._central_date_bounds_utc('2026-09-01'), 'lafayette', 10)[1], 1)
             finally:
                 conn.close()
+
+
+class CollectorIsolationTests(unittest.TestCase):
+    """One source failing must not stop the others or hide the failure."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        for patcher in (
+            patch.object(app, 'DB_PATH', os.path.join(directory.name, 'live.db')),
+            patch.object(app, 'log'),
+            patch('traceback.print_exc'),
+            patch.dict(app.source_last_scrape_monotonic, {}, clear=True),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        app.init_db()
+
+    def collect(self, failing=None, unavailable=None):
+        real = app.process_incidents
+        processed = []
+
+        def process(incidents, *, source, **kwargs):
+            if source == failing:
+                raise app.sqlite3.OperationalError('database is locked')
+            processed.append(source)
+            return real(incidents, source=source, **kwargs)
+
+        app.source_last_scrape_monotonic.clear()
+        with ExitStack() as stack:
+            for source in app.VALID_SOURCES:
+                result = (None, None) if source == unavailable else ([], None)
+                stack.enter_context(patch.object(app, f'scrape_{source}_incidents', return_value=result))
+            stack.enter_context(patch.object(app, 'process_incidents', side_effect=process))
+            app.background_scrape()
+        with app.app.test_request_context('/api/status'):
+            return processed, app.get_status().get_json()
+
+    def test_a_source_that_fails_to_store_does_not_skip_later_sources(self):
+        processed, status = self.collect(failing='caddo')
+        self.assertEqual(set(processed), app.LIVE_SNAPSHOT_SOURCES - {'caddo'})
+        self.assertIsNotNone(status['lastScrapeFinishedAt'])
+        health = status['sourceHealth']
+        self.assertIn('database is locked', health['caddo']['error'])
+        self.assertIsNotNone(health['caddo']['errorAt'])
+        self.assertIsNone(health['caddo']['okAt'])
+        self.assertIsNotNone(health['batonrouge']['okAt'])
+        self.assertIsNone(health['batonrouge']['error'])
+
+    def test_an_unavailable_live_feed_is_reported_until_it_recovers(self):
+        _, status = self.collect(unavailable='lafayette')
+        self.assertTrue(status['sourceHealth']['lafayette']['error'])
+        _, status = self.collect()
+        recovered = status['sourceHealth']['lafayette']
+        self.assertIsNone(recovered['error'])
+        self.assertIsNotNone(recovered['okAt'])
+        # The last failure time stays for diagnosis.
+        self.assertIsNotNone(recovered['errorAt'])
