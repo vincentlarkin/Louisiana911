@@ -851,10 +851,41 @@ def _map_tile_host():
     return f"https://{parts.netloc.lower()}"
 
 
+_asset_fingerprints: dict[str, tuple[float, str]] = {}
+
+
+def _asset_fingerprint(filename: str) -> str:
+    """Short content hash of a public asset, recomputed when the file changes."""
+    path = os.path.join(app.root_path, 'public', filename)
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return ''
+    cached = _asset_fingerprints.get(filename)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    with open(path, 'rb') as asset:
+        digest = hashlib.sha256(asset.read()).hexdigest()[:12]
+    _asset_fingerprints[filename] = (mtime, digest)
+    return digest
+
+
+def _fingerprint_asset_urls(html: str) -> str:
+    """Point styles.css at a URL that changes whenever its content does.
+
+    Browsers and Cloudflare keep styles.css for hours, so a hand-maintained
+    ?v= that is not bumped serves new markup with old CSS.
+    """
+    digest = _asset_fingerprint('styles.css')
+    if not digest:
+        return html
+    return re.sub(r'(href="/?styles\.css)(\?v=[^"]*)?"', rf'\1?v={digest}"', html)
+
+
 def _read_map_index_html():
     index_path = os.path.join(app.root_path, 'public', 'index.html')
     with open(index_path, 'r', encoding='utf-8') as index_file:
-        index_html = index_file.read()
+        index_html = _fingerprint_asset_urls(index_file.read())
     # Browser basemap keys are intentionally public; keep deployment config out of git.
     key = _carto_basemap_key()
     tile_host = _map_tile_host()

@@ -45,3 +45,29 @@ class MapTileHostTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class AssetFingerprintTests(unittest.TestCase):
+    def test_stylesheet_url_follows_its_content(self):
+        with open(os.path.join(app.app.root_path, 'public', 'styles.css'), 'rb') as css:
+            digest = app.hashlib.sha256(css.read()).hexdigest()[:12]
+        html = app._read_map_index_html()
+        self.assertIn(f'href="styles.css?v={digest}"', html)
+        self.assertNotIn('styles.css?v=4.', html)
+
+    def test_changed_stylesheet_gets_a_new_url(self):
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, 'public'))
+            css = os.path.join(root, 'public', 'styles.css')
+            with open(css, 'w') as handle:
+                handle.write('a{}')
+            with patch.object(app.app, 'root_path', root):
+                app._asset_fingerprints.clear()
+                first = app._fingerprint_asset_urls('<link rel="stylesheet" href="styles.css?v=4.11.0" />')
+                with open(css, 'w') as handle:
+                    handle.write('b{}')
+                os.utime(css, (1, 1))
+                second = app._fingerprint_asset_urls('<link rel="stylesheet" href="styles.css?v=4.11.0" />')
+            app._asset_fingerprints.clear()
+        self.assertNotEqual(first, second)
+        self.assertRegex(second, r'href="styles\.css\?v=[0-9a-f]{12}"')
