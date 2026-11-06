@@ -2345,6 +2345,12 @@ def _resolve_incident_hash(cursor, incident: dict, observed_at: str) -> str:
     both describe the same reported time. A closed row from another day is a
     different call that happens to share the clock time, so it gets a dated hash
     instead of being reopened and merged into the old record.
+
+    An open record whose current fields equal this row keeps its own hash even
+    when that hash was derived from earlier field values: a dated occurrence
+    still on the feed past midnight, or a call adopted by
+    ``_adopt_changed_calls`` after the source changed its agency list or
+    description.
     """
     base_hash = hash_incident(incident)
     if _clean_ws(incident.get('source_id') or ''):
@@ -2356,10 +2362,9 @@ def _resolve_incident_hash(cursor, incident: dict, observed_at: str) -> str:
         ).fetchone()
     except sqlite3.OperationalError:
         return base_hash
-    if existing is None or existing[0]:
+    if existing is not None and existing[0]:
         return base_hash
     source = incident.get('source')
-    # A dated occurrence that is still on the feed keeps its hash past midnight.
     try:
         continuing = cursor.execute(
             '''SELECT hash FROM incidents
@@ -2373,6 +2378,8 @@ def _resolve_incident_hash(cursor, incident: dict, observed_at: str) -> str:
         continuing = None
     if continuing:
         return continuing[0]
+    if existing is None:
+        return base_hash
     reported_at = _incident_reported_at(
         {'source': source, 'time': incident.get('time'), 'first_seen': observed_at}
     )
@@ -2382,6 +2389,65 @@ def _resolve_incident_hash(cursor, incident: dict, observed_at: str) -> str:
     if not reported_at or not existing_reported_at or reported_at == existing_reported_at:
         return base_hash
     return hash_incident(incident, reported_at=reported_at)
+
+
+# Feeds without a source ID hash every published field, so a field that changes
+# while the call stays open would otherwise start a second record. These are the
+# fields that stay fixed for the life of a call on each feed.
+CONTINUING_CALL_FIELDS = {
+    # Lafayette's agency column lists every assisting agency and grows as
+    # units join the call.
+    'lafayette': ('time', 'street', 'cross_streets', 'municipality'),
+    # Caddo and Baton Rouge publish one row per agency, so agency stays part of
+    # identity; their call descriptions are reclassified as calls develop.
+    'caddo': ('agency', 'time', 'street', 'cross_streets', 'municipality'),
+    'batonrouge': ('agency', 'time', 'street', 'cross_streets', 'municipality'),
+}
+
+
+def _continuing_call_key(record: dict, fields: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(_clean_ws('' if record.get(field) is None else str(record.get(field))) for field in fields)
+
+
+def _adopt_changed_calls(cursor, incidents: list[dict], hashes: list[str], source: str) -> dict[int, str]:
+    """Map changed feed rows onto the open records they continue.
+
+    Returns ``{incident index: stored hash}``. A row with no stored record adopts
+    an open record that is missing from this snapshot only when exactly one such
+    row and exactly one such record share the call's fixed fields. Anything
+    ambiguous stays separate rather than guessing which call became which.
+    """
+    fields = CONTINUING_CALL_FIELDS.get(source)
+    if not fields:
+        return {}
+    unmatched: dict[tuple[str, ...], list[int]] = {}
+    try:
+        for index, (incident, incident_hash) in enumerate(zip(incidents, hashes)):
+            if incident.get('source') != source or _clean_ws(incident.get('source_id') or ''):
+                continue
+            if cursor.execute('SELECT 1 FROM incidents WHERE hash = ?', (incident_hash,)).fetchone():
+                continue
+            unmatched.setdefault(_continuing_call_key(incident, fields), []).append(index)
+        if not unmatched:
+            return {}
+        open_rows = cursor.execute(
+            f"SELECT hash, {', '.join(fields)} FROM incidents WHERE is_active = 1 AND source = ?",
+            (source,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    in_snapshot = set(hashes)
+    missing: dict[tuple[str, ...], list[str]] = {}
+    for row in open_rows:
+        if row[0] in in_snapshot:
+            continue
+        missing.setdefault(_continuing_call_key(dict(zip(fields, row[1:])), fields), []).append(row[0])
+    adopted = {}
+    for key, indexes in unmatched.items():
+        candidates = missing.get(key, [])
+        if len(indexes) == 1 and len(candidates) == 1:
+            adopted[indexes[0]] = candidates[0]
+    return adopted
 
 def scrape_caddo_incidents():
     """
@@ -2688,16 +2754,25 @@ def _store_incidents(conn, incidents, source_default: str, deactivate_missing: b
         # points queryable immediately, before slower 0,0 location fallbacks.
         ordered_incidents.sort(key=_new_orleans_processing_priority)
 
-    for incident_index, incident in enumerate(ordered_incidents, start=1):
-        if source_default == 'neworleans' and incident_index > 1 and (incident_index - 1) % 25 == 0:
-            conn.commit()
-        incident_source = _normalize_source_name(incident.get('source') if isinstance(incident, dict) else source_default)
-        incident['source'] = incident_source
-        desired_active = 1 if incident.get('is_active', True) else 0
+    # Resolve every row's stored hash before writing, so calls whose published
+    # fields changed can be matched against the whole snapshot.
+    prepared = []
+    for incident in ordered_incidents:
+        incident['source'] = _normalize_source_name(incident.get('source') if isinstance(incident, dict) else source_default)
         occurred_at = incident.get('occurred_at')
         if not isinstance(occurred_at, str) or not _parse_iso_datetime(occurred_at):
             occurred_at = None
-        h = _resolve_incident_hash(cursor, incident, occurred_at or now)
+        prepared.append((incident, occurred_at, _resolve_incident_hash(cursor, incident, occurred_at or now)))
+    adopted = _adopt_changed_calls(
+        cursor, [item[0] for item in prepared], [item[2] for item in prepared], source_default,
+    )
+
+    for incident_index, (incident, occurred_at, h) in enumerate(prepared, start=1):
+        if source_default == 'neworleans' and incident_index > 1 and (incident_index - 1) % 25 == 0:
+            conn.commit()
+        incident_source = incident['source']
+        desired_active = 1 if incident.get('is_active', True) else 0
+        h = adopted.get(incident_index - 1, h)
         current_hashes.add(h)
 
         # Check if exists
