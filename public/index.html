@@ -999,10 +999,10 @@
       }
 
       if (!hasCenteredOnUser && (accuracyGoodEnough || waitedLongEnough)) {
-        map.flyTo(latestUserLatLng, Math.max(map.getZoom(), 16), { duration: 0.5 });
+        flyToUserLocation(latestUserLatLng);
         hasCenteredOnUser = true;
       } else if (followUserLocation) {
-        map.flyTo(latestUserLatLng, Math.max(map.getZoom(), 16), { duration: 0.5 });
+        flyToUserLocation(latestUserLatLng);
       }
 
       const accuracyLabelMiles = Number(metersToMiles(displayAccuracy).toFixed(2));
@@ -1048,9 +1048,14 @@
         );
       }
 
-      geolocationWatchId = navigator.geolocation.watchPosition(
+      let watchId = null;
+      watchId = navigator.geolocation.watchPosition(
         (position) => updateUserLocation(position),
         (error) => {
+          // A timeout or unavailable fix does not stop a browser watch, so a
+          // retry would otherwise run a second watcher beside this one.
+          navigator.geolocation.clearWatch(watchId);
+          if (geolocationWatchId !== watchId) return;
           geolocationWatchId = null;
           followUserLocation = false;
           const denied = error?.code === 1;
@@ -1068,21 +1073,36 @@
           maximumAge: 0
         }
       );
+      geolocationWatchId = watchId;
+    }
+
+    // Leaflet's flyTo fires zoomstart synchronously. Mark our own recentering
+    // so that event does not read as the visitor taking over the map.
+    let recenteringOnUser = false;
+    function flyToUserLocation(latLng) {
+      recenteringOnUser = true;
+      try {
+        map.flyTo(latLng, Math.max(map.getZoom(), 16), { duration: 0.5 });
+      } finally {
+        recenteringOnUser = false;
+      }
+    }
+
+    function stopFollowingOnUserMove() {
+      if (!recenteringOnUser) followUserLocation = false;
     }
 
     locationBtn?.addEventListener('click', () => {
       followUserLocation = true;
       if (latestUserLatLng) {
-        map.flyTo(latestUserLatLng, Math.max(map.getZoom(), 16), { duration: 0.5 });
+        flyToUserLocation(latestUserLatLng);
         setLocationButtonState('active', 'Center on my location');
         return;
       }
       startLocationTracking();
     });
 
-    map.on('dragstart zoomstart', () => {
-      followUserLocation = false;
-    });
+    map.on('dragstart zoomstart', stopFollowingOnUserMove);
     
     // Store markers
     const markers = new Map();
