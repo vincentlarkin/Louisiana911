@@ -1529,21 +1529,6 @@
       font-weight: 600;
     }
     
-    /* Settings Button */
-    .settings-btn {
-      width: 34px;
-      height: 34px;
-      border-radius: 8px;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      color: var(--text-dim);
-      cursor: pointer;
-      transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
-      margin-left: 0;
-      display: grid;
-      place-items: center;
-    }
-    
     .reports-link {
       display: inline-flex;
       align-items: center;
@@ -1563,20 +1548,6 @@
       background: var(--bg-hover);
       border-color: var(--border-strong);
       color: var(--text);
-    }
-
-    .settings-btn:hover {
-      background: var(--bg-hover);
-      border-color: var(--border-strong);
-      color: var(--text);
-    }
-    
-    .settings-btn:hover svg {
-      transform: none;
-    }
-    
-    .settings-btn svg {
-      transition: transform 0.3s ease;
     }
 
     /* Info Button */
@@ -3192,7 +3163,6 @@
         white-space: nowrap;
       }
 
-      .settings-btn,
       .info-btn,
       .location-btn,
       .reports-link {
@@ -3265,18 +3235,6 @@
       .urgency-btn {
         flex: 0 0 auto;
         padding: 4px 9px;
-      }
-
-      .settings-btn {
-        width: 34px;
-        height: 34px;
-        margin-left: 0;
-        border-radius: 7px;
-      }
-      
-      .settings-btn svg {
-        width: 14px;
-        height: 14px;
       }
 
       .info-btn {
@@ -3441,7 +3399,6 @@
        ------------------------------------------------------------------ */
 
     .logo-status,
-    .menu-btn,
     .filter-toggle {
       display: none;
     }
@@ -3791,35 +3748,20 @@
       .status-item.status-update,
       .status-item.status-active,
       .status-item.status-location,
-      .reports-link,
-      .settings-btn,
-      .info-btn {
+      .reports-link {
         display: none;
       }
 
-      .menu-btn {
+      .info-btn {
         position: absolute;
         top: calc(10px + env(safe-area-inset-top));
         right: max(12px, env(safe-area-inset-right));
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        height: 40px;
-        padding: 0 12px;
+        width: 44px;
+        height: 44px;
         border: 1px solid var(--border-strong);
         border-radius: 10px;
-        background: var(--bg-card);
         color: var(--text);
-        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-        font-size: 16px;
-        font-weight: 600;
-        cursor: pointer;
-      }
-
-      .menu-btn svg {
-        width: 18px;
-        height: 18px;
-        fill: currentColor;
+        font-size: 18px;
       }
 
       .status-bar {
@@ -4048,10 +3990,6 @@
     }
 
     @media (max-width: 360px) {
-      .menu-btn {
-        padding: 0 10px;
-      }
-
       .view-switch-btn {
         min-width: 54px;
       }
@@ -4070,7 +4008,7 @@
     @media (max-width: 720px) {
       .logo {
         min-width: 0;
-        padding-right: 108px;
+        padding-right: 56px;
       }
 
       .logo-text {
@@ -4090,31 +4028,6 @@
     }
 
     @media (max-width: 400px) {
-      .logo {
-        padding-right: 52px;
-      }
-
-      .menu-btn {
-        width: 44px;
-        height: 44px;
-        padding: 0;
-        justify-content: center;
-      }
-
-      .menu-btn svg {
-        width: 22px;
-        height: 22px;
-      }
-
-      .menu-btn-text {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        overflow: hidden;
-        clip: rect(0 0 0 0);
-        white-space: nowrap;
-      }
-
       .basemap-switcher {
         display: none;
       }
