@@ -466,6 +466,45 @@ class GeocodingTests(unittest.TestCase):
         ))
         self.assertTrue(app._road_name_matches("ST VINCENT AV", "Saint Vincent Avenue"))
 
+    def test_road_matching_accepts_caddo_cad_spellings_of_real_intersections(self):
+        # Each pair comes from a Caddo call that ArcGIS matched exactly
+        # (StreetInt, score 96-99.8) but the comparison rejected.
+        for requested, returned in [
+            ("SIOUX TR", "Sioux Trl"),                    # CAD writes TR for Trail
+            ("NAVAHO TR", "Navaho Trl"),
+            ("CIRCLE", "Circle Dr"),                      # the name is a road-type word
+            ("HILRY HUCKABY III", "Hilry Huckaby Dr"),    # generational suffix
+            ("TOM RIDGE", "Tom Rdg"),                     # abbreviated name word
+        ]:
+            with self.subTest(requested=requested):
+                self.assertTrue(app._road_name_matches(requested, returned))
+
+    def test_road_matching_stays_strict_about_different_roads(self):
+        for requested, returned in [
+            ("OAK RIDGE DR", "Oak Dr"),        # Ridge is part of the name here
+            ("CIRCLE", "Crescent Cv"),
+            ("LOOP", "Circle Dr"),
+            ("HUCKABY", "Hilry Huckaby Dr"),
+            ("SIOUX TR", "Navaho Trl"),
+            ("LA LAURIE", "Laurie Ln"),        # La may be part of the name
+        ]:
+            with self.subTest(requested=requested):
+                self.assertFalse(app._road_name_matches(requested, returned))
+
+    def test_trail_segment_resolves_from_cad_abbreviations(self):
+        sioux = "TECUMSEH & SIOUX TR, Shreveport, Caddo Parish, LA"
+        navaho = "TECUMSEH & NAVAHO TR, Shreveport, Caddo Parish, LA"
+        fake = FakeArcGIS({
+            sioux: [FakeLocation("Tecumseh Trl & Sioux Trl, Shreveport, Louisiana, 71107",
+                                 32.5600, -93.7700, address_type="StreetInt", score=99.8)],
+            navaho: [FakeLocation("Tecumseh Trl & Navaho Trl, Shreveport, Louisiana, 71107",
+                                  32.5610, -93.7710, address_type="StreetInt", score=99.8)],
+        })
+        app.geolocator_arcgis = fake
+        result = app.geocode_address("TECUMSEH", "SIOUX TR & NAVAHO TR", "SHV", source="caddo")
+        self.assertEqual("street-segment", result["quality"])
+        self.assertAlmostEqual(32.5605, result["lat"])
+
     def test_stale_active_row_self_heals_to_current_geocoder_version(self):
         jump_query = (
             "E BERT KOUNS INDUSTRIAL & JUMP RUN, "
