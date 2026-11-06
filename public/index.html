@@ -80,6 +80,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com">
+  <!-- The basemap style, tiles and fonts come from here; open the connection
+       while the page loads instead of after the app script runs. MapLibre
+       fetches with CORS, so the preconnect must be crossorigin to be reused. -->
+  <link rel="preconnect" href="https://tiles.versatiles.org" crossorigin>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -794,44 +798,28 @@
       return response.json();
     }
 
+    // Caddo, East Baton Rouge and Lafayette from US Census county boundaries;
+    // Orleans from the City of New Orleans' own boundary, which follows the
+    // river geometry the NOPD feed uses. A 41 KB local file replaces a 3 MB
+    // national county download and a slow data.nola.gov request.
+    let parishOutlineRequest = null;
     async function loadParishOutline() {
-      if (parishOutlineLayer) return;
-      const countyUrl = 'https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json';
-      const officialOrleansUrl = 'https://data.nola.gov/resource/tu2j-8k42.geojson?$limit=1000';
-      const [countyResult, orleansResult] = await Promise.allSettled([
-        fetchOutlineGeoJson(countyUrl),
-        fetchOutlineGeoJson(officialOrleansUrl),
-      ]);
-
-      const countyGeoJson = countyResult.status === 'fulfilled' ? countyResult.value : null;
-      const officialOrleansGeoJson = orleansResult.status === 'fulfilled' ? orleansResult.value : null;
-      const statewideParishIds = new Set(['22017', '22033', '22055']); // Caddo, EBR, Lafayette
-      const features = (countyGeoJson?.features || []).filter(
-        feature => statewideParishIds.has(String(feature?.id))
-      );
-
-      // The older national county file cuts across valid Uptown NOPD points.
-      // Prefer the City of New Orleans' own current Orleans Parish boundary,
-      // which follows the actual river/land geometry used by the public feed.
-      const officialOrleansFeatures = officialOrleansGeoJson?.features || [];
-      if (officialOrleansFeatures.length) {
-        features.push(...officialOrleansFeatures);
-      } else {
-        const fallbackOrleans = (countyGeoJson?.features || []).find(
-          feature => String(feature?.id) === '22071'
-        );
-        if (fallbackOrleans) features.push(fallbackOrleans);
+      if (parishOutlineLayer || parishOutlineRequest) return parishOutlineRequest;
+      parishOutlineRequest = fetchOutlineGeoJson('parish-outlines.json');
+      let outlines;
+      try {
+        outlines = await parishOutlineRequest;
+      } catch (error) {
+        console.error('Parish boundaries could not be loaded:', error);
+        parishOutlineRequest = null;
+        return;
       }
-
-      if (!features.length) {
+      if (!outlines?.features?.length) {
         console.error('No parish boundary features were available.');
         return;
       }
 
-      parishOutlineLayer = L.geoJSON(
-        { type: 'FeatureCollection', features },
-        { style: getParishOutlineStyle() }
-      );
+      parishOutlineLayer = L.geoJSON(outlines, { style: getParishOutlineStyle() });
       parishOutlineLayer.addTo(map);
     }
     
