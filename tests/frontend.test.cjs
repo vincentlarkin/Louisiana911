@@ -909,3 +909,51 @@ test('basemap failures step down: our copy, then the public server, then raster;
   ctx.handleBasemapLoadTimeout();
   assert.deepEqual(steps.splice(0), ['raster']);
 });
+
+test('opening History keeps the map where the visitor is looking', async () => {
+  const fits = [];
+  const ctx = loadFunctions(['loadHistory', 'refreshHistoryMapMarkers'], {
+    historyRequestId: 0, currentSource: 'caddo', historySelectedDate: '2026-09-04',
+    isoToday: '2026-09-04', historyDayCache: new Map(), historyBatchSize: 100,
+    URLSearchParams, showAllHistoryOnMap: true, currentFilter: 'all', currentUrgencyFilter: 'all',
+    currentHistoryIncidents: [], allHistoryIncidentsForDay: [], historyTotal: 0,
+    document: { getElementById: () => ({ innerHTML: '', classList: { contains: () => false, add() {}, remove() {} } }) },
+    updateHistoryPagination() {}, updateFilterButtonVisibility() {}, updateHistoryCount() {},
+    renderHistoryList() {}, getHistoryFilteredTotal: () => 2,
+    getHistoryPageData: items => ({ pageData: items, skipSort: false }),
+    getFilteredIncidents: items => items,
+    setMapMarkers: (items, options = {}) => fits.push(Boolean(options.fit)),
+    fetchHistoryApi: async () => response({ incidents: [incident, { ...incident, id: 2 }], total: 2 }),
+  });
+  await ctx.loadHistory('2026-09-04');
+  ctx.refreshHistoryMapMarkers();
+  ctx.showAllHistoryOnMap = false;
+  ctx.refreshHistoryMapMarkers();
+  assert.ok(fits.length >= 3);
+  assert.deepEqual(fits.filter(Boolean), [], 'History must not zoom the map to fit the day');
+});
+
+test('basemap skips tile fades and pulses pause while the map moves', () => {
+  const created = [];
+  const ctx = loadFunctions(['showVectorBasemap', 'setMapMoving'], {
+    cartoKey: '', vectorFailed: false, vectorLayer: null, vectorMode: null, vectorLoadTimer: null,
+    vectorProvider: null, oldMapStyle: false,
+    BASEMAP_PROVIDERS: { colorful: { styles: { dark: 'd', light: 'l' }, attribution: 'v' } },
+    basemapRequest: url => ({ url }), handleBasemapError() {}, handleBasemapLoadTimeout() {}, fallBackToRaster() {},
+    L: { maplibreGL(options) { created.push(options); return { addTo() {},
+      getMaplibreMap: () => ({ on() {}, getCanvas: () => ({ addEventListener() {} }) }) }; } },
+    map: { getContainer: () => container }, setTimeout: () => 1, clearTimeout() {},
+  });
+  const classes = new Set();
+  var container = { classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) } };
+  ctx.map.getContainer = () => container;
+  assert.equal(ctx.showVectorBasemap('dark'), true);
+  assert.equal(created[0].fadeDuration, 0);
+  assert.equal(created[0].renderWorldCopies, false);
+  ctx.setMapMoving(true);
+  assert.ok(classes.has('map-moving'));
+  ctx.setMapMoving(false);
+  assert.ok(!classes.has('map-moving'));
+  const css = require('node:fs').readFileSync(path.join(__dirname, '../public/styles.css'), 'utf8');
+  assert.match(css, /\.map-moving \.unit-count-pulse \{\s*animation-play-state: paused;/);
+});
