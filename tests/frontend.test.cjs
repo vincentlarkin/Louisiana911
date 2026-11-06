@@ -365,6 +365,51 @@ test('a source switch discards the previous source response', async () => {
   assert.equal(ctx.rendered, undefined);
 });
 
+test('a failed location watch is cleared so retrying never runs two watchers', () => {
+  const watches = new Map();
+  let nextId = 0;
+  const geolocation = {
+    getCurrentPosition() {},
+    watchPosition(onPosition, onError) { nextId += 1; watches.set(nextId, onError); return nextId; },
+    clearWatch(id) { watches.delete(id); },
+  };
+  const waiterErrors = [];
+  const ctx = loadFunctions(['startLocationTracking'], {
+    navigator: { geolocation }, geolocationWatchId: null, followUserLocation: true,
+    hasPrimedHighAccuracy: true, locationTrackingStartedAt: 0, bestAccuracyMeters: 0,
+    bestLocationLatLng: null, waitingForBetterFixLogged: false, Number, Date,
+    logLocationEvent() {}, setLocationButtonState: (state) => { ctx.buttonState = state; },
+    userLocationWaiters: [{ reject: error => waiterErrors.push(error) }],
+    updateUserLocation() {},
+  });
+  ctx.startLocationTracking();
+  assert.equal(watches.size, 1);
+  // A timeout does not stop a browser watch on its own.
+  watches.get(1)({ code: 3, message: 'timeout' });
+  assert.equal(watches.size, 0);
+  assert.equal(vm.runInContext('geolocationWatchId', ctx), null);
+  assert.equal(vm.runInContext('followUserLocation', ctx), false);
+  assert.equal(ctx.buttonState, 'error');
+  assert.equal(waiterErrors.length, 1);
+  ctx.startLocationTracking();
+  assert.equal(watches.size, 1);
+  assert.equal(vm.runInContext('geolocationWatchId', ctx), 2);
+});
+
+test('follow mode survives its own recentering but stops when the visitor moves the map', () => {
+  const ctx = loadFunctions(['flyToUserLocation', 'stopFollowingOnUserMove'], {
+    followUserLocation: true, recenteringOnUser: false, Math,
+  });
+  // Leaflet's flyTo fires zoomstart synchronously, before any animation frame.
+  ctx.map = { getZoom: () => 12, flyTo: (latLng, zoom) => { ctx.flown = [latLng, zoom]; ctx.stopFollowingOnUserMove(); } };
+  ctx.flyToUserLocation([32.5, -93.7]);
+  assert.deepEqual(ctx.flown, [[32.5, -93.7], 16]);
+  assert.equal(vm.runInContext('followUserLocation', ctx), true);
+  assert.equal(vm.runInContext('recenteringOnUser', ctx), false);
+  ctx.stopFollowingOnUserMove();
+  assert.equal(vm.runInContext('followUserLocation', ctx), false);
+});
+
 test('routine status polling preserves today’s History page and reloads at midnight', async () => {
   let centralDate = '2026-09-04';
   const selected = [];
