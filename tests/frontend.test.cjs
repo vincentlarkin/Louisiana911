@@ -838,3 +838,22 @@ test('the poll loop always reschedules and a visibility change cannot start a se
   assert.deepEqual(scheduled, [60000]);
   assert.equal(vm.runInContext('pollInFlight', ctx), false);
 });
+
+test('parish outlines load once from the local file, never the national county data', async () => {
+  const fs = require('node:fs');
+  const outlines = JSON.parse(fs.readFileSync(path.join(__dirname, '../public/parish-outlines.json'), 'utf8'));
+  assert.deepEqual(outlines.features.map(f => f.id).sort(), ['22017', '22033', '22055', '22071']);
+  const requested = [];
+  const added = [];
+  const ctx = loadFunctions(['fetchOutlineGeoJson', 'loadParishOutline'], {
+    parishOutlineLayer: null, parishOutlineRequest: null, map: {},
+    fetch: async url => { requested.push(url); return { ok: true, json: async () => outlines }; },
+    getParishOutlineStyle: () => ({}),
+    L: { geoJSON: data => ({ addTo() { added.push(data); } }) },
+  });
+  // Switching to the map view twice quickly must not add the outline twice.
+  await Promise.all([ctx.loadParishOutline(), ctx.loadParishOutline()]);
+  assert.deepEqual(requested, ['parish-outlines.json']);
+  assert.equal(added.length, 1);
+  assert.doesNotMatch(html, /geojson-counties-fips|data\.nola\.gov\/resource\/tu2j-8k42/);
+});
