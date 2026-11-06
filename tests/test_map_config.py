@@ -19,14 +19,23 @@ class MapTileHostTests(unittest.TestCase):
         with patch.dict(os.environ, {'LOUISIANA911_MAP_TILE_HOST': value}), patch.object(app, 'log'):
             return app._map_tile_host()
 
-    def test_accepts_only_a_bare_https_origin(self):
+    def test_accepts_an_https_origin_with_an_optional_path(self):
         self.assertEqual(self.tile_host('https://maps.louisiana911.com'), 'https://maps.louisiana911.com')
         self.assertEqual(self.tile_host(' https://Maps.Louisiana911.com/ '), 'https://maps.louisiana911.com')
-        for bad in ['http://maps.louisiana911.com', 'maps.louisiana911.com', 'https://maps.louisiana911.com/tiles',
-                    'https://maps.louisiana911.com?x=1', 'https://user:pw@maps.louisiana911.com',
+        self.assertEqual(self.tile_host('https://louisiana911.com/basemap/'), 'https://louisiana911.com/basemap')
+        for bad in ['http://maps.louisiana911.com', 'maps.louisiana911.com', 'https://louisiana911.com/base map',
+                    'https://maps.louisiana911.com?x=1', 'https://maps.louisiana911.com#x',
+                    'https://user:pw@maps.louisiana911.com', 'https://louisiana911.com/a/../b"',
                     'javascript:alert(1)', 'https://']:
             with self.subTest(value=bad):
                 self.assertEqual(self.tile_host(bad), '')
+
+    def test_tiles_on_this_site_need_no_preconnect(self):
+        with patch.dict(os.environ, {'LOUISIANA911_MAP_TILE_HOST': 'https://louisiana911.com/basemap'}):
+            html = app._read_map_index_html()
+        self.assertEqual(page_config(html)['tileHost'], 'https://louisiana911.com/basemap')
+        self.assertNotIn('rel="preconnect" href="https://tiles.versatiles.org"', html)
+        self.assertNotIn('rel="preconnect" href="https://louisiana911.com', html)
 
     def test_unset_keeps_the_public_server(self):
         with patch.dict(os.environ, {}, clear=False):
