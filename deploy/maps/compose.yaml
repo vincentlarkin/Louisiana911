@@ -1,0 +1,14 @@
+# Louisiana map tile server for maps.louisiana911.com.
+# MAP_TILES_DIR holds config.yaml and the two .versatiles files written by
+# update-map-tiles.sh. Cloudflare Tunnel routes maps.louisiana911.com here.
+services:
+  louisiana911-maps:
+    # Pinned; bump deliberately (see README.md, "Upgrading").
+    image: versatiles/versatiles-frontend:v5.3.0-alpine
+    container_name: louisiana911-maps
+    entrypoint: ["/sbin/tini", "--", "/app/versatiles", "serve", "-c", "/data/config.yaml"]
+    volumes:
+      - ${MAP_TILES_DIR:?set MAP_TILES_DIR}:/data:ro
+    ports:
+      - "8095:8080"
+    restart: unless-stopped

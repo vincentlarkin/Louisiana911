@@ -516,7 +516,8 @@ test('vector styles share a renderer and unavailable WebGL falls back', () => {
       colorful: { styles: { dark: 'dark-style', light: 'light-style' }, attribution: 'credits' },
       carto: { styles: { dark: 'carto-dark', light: 'carto-light' }, attribution: 'carto credits' },
     },
-    cartoRequest: url => ({ url }),
+    cartoRequest: url => ({ url }), basemapRequest: url => ({ url }),
+    handleBasemapError() {}, handleBasemapLoadTimeout() {},
     L: { maplibreGL() { creates++; return layer; } },
     map: { hasLayer: () => true, removeLayer() {} },
     setTimeout: () => 1, clearTimeout() {}, queueMicrotask: fn => fn(),
@@ -548,7 +549,8 @@ test('colorful maps are the default and old map style switches providers', () =>
       colorful: { styles: { dark: 'colorful-dark', light: 'colorful' }, attribution: 'VersaTiles' },
       carto: { styles: { dark: 'carto-dark', light: 'carto-light' }, attribution: 'CARTO' },
     },
-    cartoRequest: url => ({ url }),
+    cartoRequest: url => ({ url }), basemapRequest: url => ({ url }),
+    handleBasemapError() {}, handleBasemapLoadTimeout() {},
     L: { maplibreGL(options) { const layer = makeLayer(options); created.push(layer); return layer; } },
     map: { hasLayer: () => true, removeLayer(layer) { removed.push(layer); } },
     setTimeout: () => 1, clearTimeout() {}, fallBackToRaster() {},
@@ -856,4 +858,54 @@ test('parish outlines load once from the local file, never the national county d
   assert.deepEqual(requested, ['parish-outlines.json']);
   assert.equal(added.length, 1);
   assert.doesNotMatch(html, /geojson-counties-fips|data\.nola\.gov\/resource\/tu2j-8k42/);
+});
+
+test('self-hosted tiles: requests are rewritten to our host and nothing else is touched', () => {
+  const ctx = loadFunctions(['cartoRequest', 'basemapRequest'], {
+    URL, VERSATILES_ORIGIN: 'https://tiles.versatiles.org', tileHost: 'https://maps.louisiana911.com',
+    useTileHost: true, cartoKey: 'k',
+  });
+  for (const path of ['/assets/styles/colorful-dark/style.json', '/tiles/osm/11/490/828',
+    '/assets/glyphs/noto_sans_regular/0-255.pbf', '/assets/sprites/base@2x.json']) {
+    assert.equal(ctx.basemapRequest(`https://tiles.versatiles.org${path}`).url, `https://maps.louisiana911.com${path}`);
+  }
+  assert.match(ctx.basemapRequest('https://a.basemaps.cartocdn.com/x.png').url, /key=k/);
+  assert.equal(ctx.basemapRequest('https://example.com/tiles.versatiles.org/x').url, 'https://example.com/tiles.versatiles.org/x');
+  ctx.useTileHost = false;
+  assert.equal(ctx.basemapRequest('https://tiles.versatiles.org/tiles/osm/1/0/0').url, 'https://tiles.versatiles.org/tiles/osm/1/0/0');
+});
+
+test('basemap failures step down: our copy, then the public server, then raster; single tiles never', () => {
+  const steps = [];
+  const make = (overrides = {}) => loadFunctions(['handleBasemapError', 'handleBasemapLoadTimeout', 'fallBackFromTileHost'], {
+    useTileHost: true, vectorProvider: 'colorful', tileHostTileLoaded: false, tileHostTileErrors: 0,
+    vectorLayer: {}, vectorMode: 'dark', basemapMode: 'dark', vectorLoadTimer: null,
+    map: { hasLayer: () => true, removeLayer() { steps.push('remove'); } },
+    queueMicrotask: fn => fn(), clearTimeout() {}, console: { warn() {} },
+    setBasemapMode: () => steps.push('public'), fallBackToRaster: () => steps.push('raster'),
+    ...overrides,
+  });
+
+  // Missing tiles outside the extract, once our copy has served tiles: keep going.
+  let ctx = make({ tileHostTileLoaded: true });
+  for (let i = 0; i < 20; i++) ctx.handleBasemapError({ sourceId: 'versatiles-shortbread', tile: {} });
+  assert.deepEqual(steps, []);
+
+  // Our copy serving no tiles at all: switch to the public server once.
+  ctx = make();
+  for (let i = 0; i < 10; i++) ctx.handleBasemapError({ sourceId: 'versatiles-shortbread', tile: {} });
+  assert.deepEqual(steps.splice(0), ['remove', 'public']);
+  assert.equal(vm.runInContext('useTileHost', ctx), false);
+
+  // A style failure on our copy goes to the public server, then to raster.
+  ctx = make();
+  ctx.handleBasemapError({ error: new Error('style failed') });
+  ctx.handleBasemapError({ error: new Error('style failed') });
+  assert.deepEqual(steps.splice(0), ['remove', 'public', 'raster']);
+
+  // Without our copy, tile errors are ignored and a style failure goes to raster.
+  ctx = make({ useTileHost: false });
+  ctx.handleBasemapError({ sourceId: 'versatiles-shortbread', tile: {} });
+  ctx.handleBasemapLoadTimeout();
+  assert.deepEqual(steps.splice(0), ['raster']);
 });
