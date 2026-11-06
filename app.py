@@ -3128,21 +3128,54 @@ def background_scrape():
             continue
         source_last_scrape_monotonic[source_name] = monotonic_now
         log(f"[{datetime.now().strftime('%H:%M:%S')}] Scraping {label}...")
-        incidents, refreshed_at_text = scraper()
-        _store_feed_refresh(source_name, refreshed_at_text)
-        if incidents or (source_name in LIVE_SNAPSHOT_SOURCES and incidents is not None):
-            process_incidents(incidents, source=source_name,
-                              allow_empty=source_name in LIVE_SNAPSHOT_SOURCES and incidents is not None)
-            active_count = sum(1 for incident in incidents if incident.get('is_active', True))
-            log(
-                f"[{datetime.now().strftime('%H:%M:%S')}] Processed {len(incidents)} "
-                f"incidents ({active_count} latest) from {source_name}"
-            )
-        else:
-            log(f"[{datetime.now().strftime('%H:%M:%S')}] No incidents found or scraping failed for {source_name}")
+        # Each source is isolated: a failure (for example a locked database
+        # while storing) is logged and reported, then the next source runs.
+        try:
+            _collect_source(source_name, scraper)
+        except Exception as error:
+            log(f"[{datetime.now().strftime('%H:%M:%S')}] Collection failed for {source_name}: {error}")
+            import traceback
+            traceback.print_exc()
+            _record_source_health(source_name, f'{type(error).__name__}: {error}')
 
     last_scrape_finished_at = datetime.now(timezone.utc).isoformat()
     meta_set('last_scrape_finished_at', last_scrape_finished_at)
+
+
+def _collect_source(source_name: str, scraper) -> None:
+    incidents, refreshed_at_text = scraper()
+    _store_feed_refresh(source_name, refreshed_at_text)
+    is_live = source_name in LIVE_SNAPSHOT_SOURCES
+    if incidents or (is_live and incidents is not None):
+        process_incidents(incidents, source=source_name, allow_empty=is_live and incidents is not None)
+        active_count = sum(1 for incident in incidents if incident.get('is_active', True))
+        log(
+            f"[{datetime.now().strftime('%H:%M:%S')}] Processed {len(incidents)} "
+            f"incidents ({active_count} latest) from {source_name}"
+        )
+        _record_source_health(source_name, None)
+        return
+    log(f"[{datetime.now().strftime('%H:%M:%S')}] No incidents found or scraping failed for {source_name}")
+    # Live feeds return None only when the request failed or the page was
+    # unrecognized. Delayed feeds return [] for both failure and no new calls,
+    # so an empty delayed result is not recorded either way.
+    if incidents is None:
+        _record_source_health(source_name, 'Feed request failed or the page was unrecognized')
+
+
+def _record_source_health(source_name: str, error: str | None) -> None:
+    """Keep each source's last successful collection and last error for /api/status."""
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        if error is None:
+            meta_set(f'source_ok_at_{source_name}', now)
+            meta_set(f'source_error_{source_name}', '')
+        else:
+            meta_set(f'source_error_at_{source_name}', now)
+            meta_set(f'source_error_{source_name}', error[:300])
+    except Exception as meta_error:
+        # The database may be the thing that failed; never let reporting break the loop.
+        log(f"[HEALTH] Could not record {source_name} status: {meta_error}")
 
 
 VALID_SOURCES = {'caddo', 'lafayette', 'batonrouge', 'neworleans', 'lakecharles', 'sulphur'}
@@ -4124,7 +4157,16 @@ def get_status():
         'last_scrape_started_at',
         'last_scrape_finished_at',
         'scrape_interval_seconds',
+        *(f'source_{field}_{name}' for name in sorted(VALID_SOURCES) for field in ('ok_at', 'error_at', 'error')),
     ])
+    source_health = {
+        name: {
+            'okAt': meta.get(f'source_ok_at_{name}') or None,
+            'errorAt': meta.get(f'source_error_at_{name}') or None,
+            'error': meta.get(f'source_error_{name}') or None,
+        }
+        for name in sorted(VALID_SOURCES)
+    }
 
     interval_seconds = int(meta.get('scrape_interval_seconds') or scrape_interval_seconds)
     now_central = datetime.now(CENTRAL_TZ)
@@ -4153,6 +4195,9 @@ def get_status():
         'feedRefreshedBySource': refreshed_by_source,
         'lastScrapeStartedAt': meta.get('last_scrape_started_at') or last_scrape_started_at,
         'lastScrapeFinishedAt': meta.get('last_scrape_finished_at') or last_scrape_finished_at,
+        # Per-source last success and last error. A current error means the
+        # source's most recent collection failed; errorAt remains after recovery.
+        'sourceHealth': source_health,
         'serverNow': datetime.now(timezone.utc).isoformat(),
         # Central-time helpers for the UI (so clients always see Louisiana time, not browser locale)
         'centralTzAbbr': ("CST" if CENTRAL_TZ_IS_FALLBACK else now_central.strftime("%Z")),
