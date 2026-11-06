@@ -1286,7 +1286,18 @@ ROAD_TYPE_TOKENS = {
     "FWY", "FREEWAY", "HWY", "HIGHWAY", "LN", "LANE", "LOOP", "PASSWAY",
     "PKWY", "PARKWAY", "PL", "PLACE", "RD", "ROAD", "ST", "STREET",
     "TER", "TERRACE", "TRL", "TRAIL", "WAY",
+    # Caddo CAD abbreviates Trail as TR (SIOUX TR); providers return Trl.
+    "TR",
 }
+# Abbreviated words that belong to a road's name rather than its type. They are
+# compared in full instead of being stripped, so OAK RIDGE DR still differs
+# from OAK DR while TOM RIDGE matches Tom Rdg.
+ROAD_NAME_WORD_ALIASES = {
+    "RDG": "RIDGE", "HTS": "HEIGHTS", "XING": "CROSSING", "CRK": "CREEK", "MTN": "MOUNTAIN",
+}
+# Generational suffixes that CAD and providers include inconsistently
+# (HILRY HUCKABY III vs Hilry Huckaby Dr).
+ROAD_NAME_GENERATION_SUFFIXES = {"JR", "SR", "II", "III", "IV"}
 DIRECTION_ALIASES = {
     "N": "N", "NORTH": "N",
     "S": "S", "SOUTH": "S",
@@ -1685,6 +1696,7 @@ def _road_signature(value: str | None) -> tuple[tuple[str, ...], frozenset[str]]
     """Return comparable road-name words and explicit direction markers."""
     raw_tokens = re.findall(r"[A-Z0-9]+", _clean_ws(value or "").upper())
     name_tokens: list[str] = []
+    stripped_types: list[str] = []
     directions: set[str] = set()
 
     for idx, token in enumerate(raw_tokens):
@@ -1701,11 +1713,20 @@ def _road_signature(value: str | None) -> tuple[tuple[str, ...], frozenset[str]]
             continue
 
         if token in ROAD_TYPE_TOKENS:
+            stripped_types.append(token)
             continue
 
         if token == "I" and idx + 1 < len(raw_tokens) and raw_tokens[idx + 1].isdigit():
             token = "INTERSTATE"
-        name_tokens.append(token)
+        name_tokens.append(ROAD_NAME_WORD_ALIASES.get(token, token))
+
+    without_generation = [token for token in name_tokens if token not in ROAD_NAME_GENERATION_SUFFIXES]
+    if without_generation:
+        name_tokens = without_generation
+    # A road named with a road-type word (CIRCLE, Circle Dr) keeps that word as
+    # its name instead of reducing to nothing.
+    if not name_tokens and stripped_types:
+        name_tokens = [stripped_types[0]]
 
     return tuple(name_tokens), frozenset(directions)
 
