@@ -6,20 +6,27 @@ const path = require('node:path');
 
 const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 function loadFunctions(names, globals = {}) {
-  const context = vm.createContext({ console, window: {}, ...globals });
+  const context = vm.createContext({
+    console, window: {}, AbortController, clearTimeout,
+    // Pending request timeouts must not keep the test process alive.
+    setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timer.unref?.(); return timer; },
+    ...globals,
+  });
   // Shared source sets the loaded functions read; defined once at script top level.
-  for (const name of ['DELAYED_CLOSED_SOURCES', 'SOURCE_GROUPS', 'SOURCE_ALIASES']) {
+  for (const name of ['DELAYED_CLOSED_SOURCES', 'SOURCE_GROUPS', 'SOURCE_ALIASES', 'POLL_REQUEST_TIMEOUT_MS']) {
     const line = new RegExp(`    const ${name} = .*;`).exec(html);
     assert.ok(line, `Missing ${name}`);
     vm.runInContext(line[0], context);
   }
-  for (const name of names) {
-    const match = new RegExp(`    (?:async )?function ${name}\\(`).exec(html);
-    assert.ok(match, `Missing function ${name}`);
-    const end = html.indexOf('\n    }', match.index) + 6;
-    vm.runInContext(html.slice(match.index, end), context);
-  }
+  // Every polling request goes through this wrapper; it calls the context's fetch.
+  for (const name of ['fetchWithTimeout', ...names]) loadInto(context, name);
   return context;
+}
+function loadInto(context, name) {
+  const match = new RegExp(`    (?:async )?function ${name}\\(`).exec(html);
+  assert.ok(match, `Missing function ${name}`);
+  const end = html.indexOf('\n    }', match.index) + 6;
+  vm.runInContext(html.slice(match.index, end), context);
 }
 function deferred() {
   let resolve;
@@ -738,4 +745,51 @@ test('near me keeps calls inside the circle, closest first', () => {
   assert.equal(ctx.incidentsNear([], [NaN, 1], 3).length, 0);
   assert.equal(ctx.formatMiles(0.05), 'Under 0.1 mi');
   assert.equal(ctx.formatMiles(2.345), '2.3 mi');
+});
+
+test('feed and status requests that never answer are aborted so polling continues', async () => {
+  const hang = (url, options) => new Promise((_, reject) => {
+    options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+  });
+  const timers = [];
+  const fakeTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
+
+  const { ctx } = liveContext();
+  const outcomes = [];
+  Object.assign(ctx, { fetch: hang, setTimeout: fakeTimeout, console: { error() {} } });
+  ctx.window.louisiana911Analytics = { feedResult: result => outcomes.push(result) };
+  const feed = ctx.updateIncidents();
+  assert.equal(timers.at(-1).ms, 30000);
+  timers.at(-1).fn();
+  await feed;
+  assert.equal(outcomes.at(-1).outcome, 'error');
+
+  const status = loadFunctions(['updateStatus'], {
+    fetch: hang, setTimeout: fakeTimeout, console: { error() {}, warn() {} },
+    document: { getElementById: () => ({ classList: { contains: () => false } }) },
+  });
+  const pending = status.updateStatus();
+  timers.at(-1).fn();
+  await pending;
+});
+
+test('the poll loop always reschedules and a visibility change cannot start a second loop', async () => {
+  const scheduled = [];
+  let release;
+  let feedCalls = 0;
+  const ctx = loadFunctions(['pollLoop'], {
+    pollTimer: null, pollIntervalMs: 60000, lastPollAt: 0, pollInFlight: false,
+    document: { hidden: false }, console: { error() {} },
+    clearTimeout() {}, setTimeout: (fn, ms) => { scheduled.push(ms); return scheduled.length; },
+    updateIncidents: () => { feedCalls += 1; return new Promise(done => { release = done; }); },
+    updateStatus: async () => { throw new Error('status broke'); },
+  });
+  const first = ctx.pollLoop();
+  await ctx.pollLoop();
+  assert.equal(feedCalls, 1);
+  assert.equal(scheduled.length, 0);
+  release();
+  await first;
+  assert.deepEqual(scheduled, [60000]);
+  assert.equal(vm.runInContext('pollInFlight', ctx), false);
 });
