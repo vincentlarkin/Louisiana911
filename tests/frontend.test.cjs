@@ -304,6 +304,58 @@ test('feed telemetry reports displayed outcomes and ignores superseded failures'
   assert.equal(outcomes[2].outcome, 'error');
 });
 
+test('browsing filters releases a shared incident so later polls show the full feed', async () => {
+  const shared = { ...incident, id: 9, share_id: 'abc', is_active: 0 };
+  const other = { ...incident, id: 2 };
+  const requests = [];
+  const panels = { 'live-panel': false, 'history-panel': true };
+  const element = id => ({ classList: { contains: cls => cls === 'hidden' && Boolean(panels[id]) } });
+  const ctx = loadFunctions(['sourceMembers', 'matchesSourceFilter', 'updateIncidents',
+    'leaveSharedIncidentView', 'refreshFilteredView'], {
+    liveRequestId: 0, currentSource: 'caddo', currentIncidents: [], sharedIncidentView: shared,
+    mapMode: 'history', lastLiveListSignature: 'live|[]',
+    fetch: () => { const r = deferred(); requests.push(r); return r.promise; },
+    sourceQueryParam: () => 'source=caddo', normalizeSource: s => s,
+    updateSourceDelayBanner() {}, updateFilterButtonVisibility() {},
+    getFilteredIncidents: items => items, getIncidentShareId: i => i.share_id || String(i.id),
+    document: { getElementById: element },
+    setMapMarkers() {}, mobileStatusState: {}, renderMobileStatus() {},
+    renderSharedIncidentView() { ctx.sharedRenders = (ctx.sharedRenders || 0) + 1; },
+    renderIncidentList: items => { ctx.listed = items; },
+  });
+  const poll = async data => {
+    const pending = ctx.updateIncidents();
+    requests.at(-1).resolve(response(data));
+    await pending;
+  };
+  await poll([other]);
+  assert.equal(ctx.sharedRenders, 1);
+  assert.equal(ctx.listed, undefined);
+
+  ctx.refreshFilteredView();
+  assert.deepEqual(ctx.listed, [other]);
+  assert.equal(vm.runInContext('sharedIncidentView', ctx), null);
+  // The shared card replaced the list without updating its signature, and an
+  // inactive shared incident left the map in History mode.
+  assert.equal(vm.runInContext('lastLiveListSignature', ctx), '');
+  assert.equal(vm.runInContext('mapMode', ctx), 'live');
+
+  ctx.listed = undefined;
+  await poll([other]);
+  assert.deepEqual(ctx.listed, [other]);
+  assert.equal(ctx.sharedRenders, 1);
+});
+
+test('source, sort and tab changes also release a shared incident', () => {
+  for (const marker of ['    function applySourceFilter(', '    function setSort(',
+    "    document.querySelectorAll('.tab').forEach(tab => {"]) {
+    const start = html.indexOf(marker);
+    assert.ok(start >= 0, `Missing ${marker}`);
+    const body = html.slice(start, html.indexOf('\n    }', start));
+    assert.match(body, /leaveSharedIncidentView\(\)/, `${marker.trim()} keeps the shared incident pinned`);
+  }
+});
+
 test('a source switch discards the previous source response', async () => {
   const { ctx, requests } = liveContext();
   const pending = ctx.updateIncidents();

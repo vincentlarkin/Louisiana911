@@ -2643,6 +2643,19 @@
       }
     }
 
+    // A shared link pins one incident to Live until the visitor picks a filter,
+    // sort, source or tab. From then on Live polls show the full feed again.
+    function leaveSharedIncidentView() {
+      if (!sharedIncidentView) return false;
+      sharedIncidentView = null;
+      // The shared card replaced the list without updating its signature.
+      lastLiveListSignature = '';
+      // An inactive shared incident put the map in History mode under Live.
+      const livePanel = document.getElementById('live-panel');
+      if (livePanel && !livePanel.classList.contains('hidden')) mapMode = 'live';
+      return true;
+    }
+
     // Update incidents
     let liveRequestId = 0;
     async function updateIncidents() {
@@ -2841,6 +2854,7 @@
 
     // Refresh the view with current filters applied
     function refreshFilteredView() {
+      leaveSharedIncidentView();
       const livePanel = document.getElementById('live-panel');
       const historyPanel = document.getElementById('history-panel');
       const liveVisible = livePanel && !livePanel.classList.contains('hidden');
@@ -3546,6 +3560,7 @@
       }
 
       currentSource = normalized;
+      leaveSharedIncidentView();
       if (coverageIntro) setCoverageIntroOpen(false, { restoreFocus: false });
       historyPage = 1;
       historyCountsByMonth.clear();
@@ -3585,7 +3600,8 @@
         document.getElementById('live-panel').classList.toggle('hidden', tabName !== 'live');
         document.getElementById('history-panel').classList.toggle('hidden', tabName !== 'history');
         historyMajorEventsButton?.classList.toggle('hidden', tabName !== 'history');
-        
+        leaveSharedIncidentView();
+
         if (tabName === 'history') {
           mapMode = 'history';
           // Clear live markers immediately; history will repopulate after fetch
@@ -3599,8 +3615,11 @@
           if (countWrap) countWrap.classList.add('hidden');
           // Live tab: make filter visibility reflect the active feed immediately
           updateFilterButtonVisibility(currentIncidents);
-          // Render live markers immediately from the last-known active incidents
-          setMapMarkers(getFilteredIncidents(currentIncidents), { fit: false, mode: 'live' });
+          // Render live markers immediately from the last-known active incidents.
+          // The list re-renders only if it changed, such as a released shared card.
+          const liveIncidents = getFilteredIncidents(currentIncidents);
+          setMapMarkers(liveIncidents, { fit: false, mode: 'live' });
+          renderIncidentList(liveIncidents);
           toggleDatePicker(false);
         }
       });
@@ -3640,6 +3659,7 @@
 
     function setSort(mode) {
       currentSort = mode === 'urgency' ? 'urgency' : 'recent';
+      leaveSharedIncidentView();
       window.louisiana911Analytics?.track('incident_sort', { control_value: currentSort });
       sortMenu?.querySelectorAll('.sort-option').forEach(option => {
         option.classList.toggle('active', option.dataset.sort === currentSort);
