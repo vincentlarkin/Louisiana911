@@ -44,6 +44,20 @@ mv -f "$INCOMING/osm.versatiles" "$DATA_DIR/osm.versatiles"
 mv -f "$INCOMING/landcover-vectors.versatiles" "$DATA_DIR/landcover-vectors.versatiles"
 log "installed osm=$osm_bytes bytes, landcover=$landcover_bytes bytes"
 
+# The Colorful styles the site requests. Their tile, font and sprite URLs
+# point at tiles.versatiles.org; the site rewrites those to this server.
+for style in colorful colorful-dark; do
+  target="$DATA_DIR/static/assets/styles/$style"
+  mkdir -p "$target"
+  if curl -sf -o "$target/style.json.new" "https://tiles.versatiles.org/assets/styles/$style/style.json"       && grep -q '"layers"' "$target/style.json.new"; then
+    mv -f "$target/style.json.new" "$target/style.json"
+    log "updated style $style"
+  else
+    rm -f "$target/style.json.new"
+    log "could not refresh style $style; keeping the current one"
+  fi
+done
+
 if docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   docker restart "$CONTAINER" > /dev/null
   log "restarted $CONTAINER"
