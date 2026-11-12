@@ -13,13 +13,14 @@ function loadFunctions(names, globals = {}) {
     ...globals,
   });
   // Shared source sets the loaded functions read; defined once at script top level.
-  for (const name of ['DELAYED_CLOSED_SOURCES', 'SOURCE_GROUPS', 'SOURCE_ALIASES', 'POLL_REQUEST_TIMEOUT_MS']) {
+  for (const name of ['DELAYED_CLOSED_SOURCES', 'SOURCE_DELAY', 'SOURCE_GROUPS', 'SOURCE_ALIASES', 'POLL_REQUEST_TIMEOUT_MS']) {
     const line = new RegExp(`    const ${name} = .*;`).exec(html);
     assert.ok(line, `Missing ${name}`);
     vm.runInContext(line[0], context);
   }
   // Every polling request goes through this wrapper; it calls the context's fetch.
-  for (const name of ['fetchWithTimeout', ...names]) loadInto(context, name);
+  // sourceDelay words every delayed call's label.
+  for (const name of ['fetchWithTimeout', 'sourceDelay', ...names]) loadInto(context, name);
   return context;
 }
 function loadInto(context, name) {
@@ -170,6 +171,41 @@ test('Sulphur is its own delayed source and cannot be labeled active or breaking
   assert.equal(ctx.incidentTimeLabel({ source: 'sulphur', time: '2345', first_seen: '2026-10-31T04:45:43Z' }), 'Oct-30 23:45');
 });
 
+test('Baton Rouge tab shows live traffic with later police calls, which are never active', () => {
+  const ctx = loadFunctions(['normalizeSource', 'sourceLabel', 'sourceMembers', 'matchesSourceFilter', 'groupIncidentsBySource',
+    'incidentActivityState', 'plainActivityText', 'formatTime', 'incidentTimeLabel', 'matchesBatonRougeAgencyFilter'],
+    { UNIT_PULSE_THRESHOLD: 5, currentBatonRougeAgency: 'all' });
+  const traffic = { source: 'batonrouge', agency: 'LAW' }, oss = { source: 'batonrouge', agency: 'OSS' };
+  const police = { source: 'brpd', agency: 'BRPD', is_active: 1, units: 10, time: '0217', first_seen: '2026-11-09T08:17:18Z' };
+  const caddo = { source: 'caddo' };
+  assert.equal(ctx.normalizeSource('brpd'), 'brpd');
+  assert.equal(ctx.matchesSourceFilter(traffic, 'batonrouge'), true);
+  assert.equal(ctx.matchesSourceFilter(police, 'batonrouge'), true);
+  assert.equal(ctx.matchesSourceFilter(caddo, 'batonrouge'), false);
+  const grouped = ctx.groupIncidentsBySource([traffic, police, caddo]);
+  assert.equal(grouped.get('batonrouge').length, 2);
+  assert.equal(grouped.has('brpd'), false);
+  assert.equal(police.source, 'brpd');
+
+  const state = ctx.incidentActivityState(police);
+  assert.equal(state.active, false);
+  assert.equal(state.veryActive, false);
+  assert.equal(state.label, 'CLOSED CALL · 1–2 DAY PUBLICATION DELAY');
+  assert.equal(ctx.plainActivityText(police), 'Closed call · posted a day or two later');
+  assert.equal(ctx.incidentTimeLabel(police), 'Nov-9 02:17');
+  assert.match(ctx.sourceLabel('brpd'), /^Baton Rouge Police .*1–2 day delay/);
+  // The other delayed feeds keep their 24-hour wording.
+  assert.equal(ctx.incidentActivityState({ source: 'sulphur' }).label, 'CLOSED CALL · 24H PUBLICATION DELAY');
+  assert.equal(ctx.plainActivityText({ source: 'lakecharles' }), 'Closed call · posted 24 hours later');
+
+  // "Police calls" shows only the later police calls; LAW and OSS only the live traffic feed.
+  for (const [filter, expected] of [['all', [true, true, true]], ['police', [false, false, true]],
+    ['law', [true, false, false]], ['oss', [false, true, false]]]) {
+    assert.deepEqual([traffic, oss, police].map(item => ctx.matchesBatonRougeAgencyFilter(item, filter)), expected, filter);
+  }
+  assert.equal(ctx.matchesBatonRougeAgencyFilter(caddo, 'police'), true);
+});
+
 test('Caddo keeps the reported clock and anchored date across midnight in every view', () => {
   const ctx = loadFunctions(['formatTime', '_incidentTimeValue', 'incidentTimeLabel']);
   const older = { source: 'caddo', time: '2350', reported_at: '2026-09-05T04:50:00+00:00',
@@ -186,7 +222,7 @@ test('Caddo keeps the reported clock and anchored date across midnight in every 
 
 test('every feed displays its reported date and keeps the source clock unchanged', () => {
   const ctx = loadFunctions(['formatTime', 'incidentTimeLabel']);
-  for (const source of ['caddo', 'batonrouge', 'lafayette', 'neworleans', 'lakecharles', 'sulphur']) {
+  for (const source of ['caddo', 'batonrouge', 'brpd', 'lafayette', 'neworleans', 'lakecharles', 'sulphur']) {
     const call = { source, time: '2350', reported_at: '2026-09-02T04:50:00Z',
       first_seen: '2026-09-05T05:10:00Z', last_seen: '2026-09-06T12:00:00Z' };
     assert.equal(ctx.incidentTimeLabel(call), 'Sep-1 23:50', source);
@@ -753,6 +789,7 @@ test('plain wording: mixed case, spelled-out agencies and areas, plain severity 
   assert.equal(ctx.plainCase('N MARKET ST & I-49'), 'N Market St & I-49');
   assert.equal(ctx.agencyPlainName({ source: 'caddo', agency: 'SPD' }), 'Shreveport Police');
   assert.equal(ctx.agencyPlainName({ source: 'sulphur', agency: 'SPD' }), 'Sulphur Police');
+  assert.equal(ctx.agencyPlainName({ source: 'brpd', agency: 'BRPD' }), 'Baton Rouge Police');
   assert.equal(ctx.agencyPlainName({ source: 'caddo', agency: 'CFD3' }), 'Caddo Fire District 3');
   assert.equal(ctx.agencyPlainName({ source: 'lafayette', agency: 'POLICE FIRE' }), 'Police / Fire');
   assert.equal(ctx.agencyPlainName({ source: 'caddo', agency: 'NCMC' }), 'NCMC');

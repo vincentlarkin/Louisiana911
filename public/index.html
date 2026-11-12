@@ -234,6 +234,9 @@
             <a class="info-feed" href="https://city.brla.gov/traffic/incidents.asp" target="_blank" rel="noopener noreferrer">
               <span class="info-feed-name">Baton Rouge traffic</span><span class="info-feed-note">Live</span><svg class="info-row-end" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
             </a>
+            <a class="info-feed" href="https://www.arcgis.com/home/item.html?id=6794bfcaaabe4576a7a9081e5d7925ae" target="_blank" rel="noopener noreferrer">
+              <span class="info-feed-name">Baton Rouge police calls</span><span class="info-feed-note">1–2 day delay</span><svg class="info-row-end" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+            </a>
             <a class="info-feed" href="https://lafayette911.org/traffic/" target="_blank" rel="noopener noreferrer">
               <span class="info-feed-name">Lafayette traffic</span><span class="info-feed-note">Live</span><svg class="info-row-end" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
             </a>
@@ -382,7 +385,7 @@
       <div class="source-tabs" id="source-tabs" aria-label="Incident source">
         <button class="source-tab active" type="button" data-source="all" title="Show all sources">All</button>
         <button class="source-tab" type="button" data-source="caddo" title="Show only Caddo incidents">Caddo</button>
-        <button class="source-tab" type="button" data-source="batonrouge" title="Show only Baton Rouge incidents">Baton Rouge</button>
+        <button class="source-tab" type="button" data-source="batonrouge" title="Live Baton Rouge traffic, plus Baton Rouge Police calls posted a day or two later">Baton Rouge</button>
         <button class="source-tab" type="button" data-source="lafayette" title="Show only Lafayette incidents">Lafayette</button>
         <button class="source-tab" type="button" data-source="neworleans" title="Show the latest published New Orleans calls for service">
           New Orleans <span class="daily-pill">Daily</span>
@@ -418,6 +421,7 @@
             <button class="filter-btn active" type="button" data-br-agency="all" title="All Baton Rouge agencies">All</button>
             <button class="filter-btn" type="button" data-br-agency="law" title="Law enforcement incidents">LAW</button>
             <button class="filter-btn" type="button" data-br-agency="oss" title="OSS incidents">OSS</button>
+            <button class="filter-btn" type="button" data-br-agency="police" title="Baton Rouge Police calls, posted a day or two later">Police calls</button>
           </div>
 
           <!-- Lafayette unit filters -->
@@ -1155,15 +1159,17 @@
     }
     const sourceFromUrl = coverageSource || new URLSearchParams(window.location.search).get('source');
     const supportedSources = new Set(['all', 'caddo', 'batonrouge', 'lafayette', 'neworleans', 'calcasieu']);
-    // Police-to-Citizen feeds: closed calls published after about 24 hours, never active.
-    const DELAYED_CLOSED_SOURCES = new Set(['lakecharles', 'sulphur', 'calcasieu']);
+    // Closed police calls published after a delay, never active.
+    const DELAYED_CLOSED_SOURCES = new Set(['lakecharles', 'sulphur', 'calcasieu', 'brpd']);
+    // How late a delayed feed publishes, where it isn't the usual 24 hours.
+    const SOURCE_DELAY = { brpd: { compact: '1–2 day', later: 'a day or two later' } };
     // Tabs that show more than one feed, and the feed names that open them.
-    const SOURCE_GROUPS = { calcasieu: ['lakecharles', 'sulphur'] };
-    const SOURCE_ALIASES = { lakecharles: 'calcasieu', sulphur: 'calcasieu' };
+    const SOURCE_GROUPS = { calcasieu: ['lakecharles', 'sulphur'], batonrouge: ['batonrouge', 'brpd'] };
+    const SOURCE_ALIASES = { lakecharles: 'calcasieu', sulphur: 'calcasieu', brpd: 'batonrouge' };
     const initialSource = SOURCE_ALIASES[sourceFromUrl] || sourceFromUrl;
     let currentSource = supportedSources.has(initialSource) ? initialSource : 'all';
     let currentLafayetteUnit = 'all'; // 'all' | 'police' | 'sheriff' | 'fire'
-    let currentBatonRougeAgency = 'all'; // 'all' | 'law' | 'oss'
+    let currentBatonRougeAgency = 'all'; // 'all' | 'law' | 'oss' | 'police'
     let currentFilter = 'all';  // Agency filter
     let currentUrgencyFilter = 'all';  // Urgency/severity filter
     let historyMajorEventsOnly = false;
@@ -1327,6 +1333,7 @@
     const SOURCE_MAP_VIEWS = {
       caddo: { center: [32.5252, -93.7502], zoom: 11 },
       batonrouge: { center: [30.4515, -91.1871], zoom: 11 },
+      brpd: { center: [30.4515, -91.1871], zoom: 11 },
       lafayette: { center: [30.2241, -92.0198], zoom: 11 },
       neworleans: { center: [29.9511, -90.0715], zoom: 11 },
       lakecharles: { center: [30.2266, -93.2174], zoom: 12 },
@@ -1338,6 +1345,7 @@
     function normalizeSource(source) {
       const s = String(source || '').trim().toLowerCase();
       if (s === 'batonrouge') return 'batonrouge';
+      if (s === 'brpd') return 'brpd';
       if (s === 'lafayette') return 'lafayette';
       if (s === 'neworleans') return 'neworleans';
       if (s === 'lakecharles') return 'lakecharles';
@@ -1349,12 +1357,17 @@
     function sourceLabel(source) {
       if (source === 'all') return 'All';
       if (source === 'batonrouge') return 'Baton Rouge';
+      if (source === 'brpd') return 'Baton Rouge Police (1–2 day delay)';
       if (source === 'lafayette') return 'Lafayette';
       if (source === 'neworleans') return 'New Orleans (Daily)';
       if (source === 'lakecharles') return 'Lake Charles (24h delay)';
       if (source === 'sulphur') return 'Sulphur (24h delay)';
       if (source === 'calcasieu') return 'Calcasieu (24h delay)';
       return 'Caddo';
+    }
+
+    function sourceDelay(source) {
+      return SOURCE_DELAY[source] || { compact: '24h', later: '24 hours later' };
     }
 
     function focusMapOnSourceSelection(source) {
@@ -1477,7 +1490,10 @@
       if (af === 'all') return true;
 
       const source = normalizeSource(incident?.source);
+      // Police calls are their own filter; LAW and OSS are the live traffic feed.
+      if (source === 'brpd') return af === 'police';
       if (source !== 'batonrouge') return true;
+      if (af === 'police') return false;
 
       const agency = String(incident?.agency || '').toUpperCase();
       if (af === 'law') return agency.includes('LAW');
@@ -1489,7 +1505,7 @@
       if (currentSource === 'all') return true;
       const source = normalizeSource(incident?.source);
       if (source === 'lafayette') return matchesLafayetteUnitFilter(incident, currentLafayetteUnit);
-      if (source === 'batonrouge') return matchesBatonRougeAgencyFilter(incident, currentBatonRougeAgency);
+      if (source === 'batonrouge' || source === 'brpd') return matchesBatonRougeAgencyFilter(incident, currentBatonRougeAgency);
       return matchesAgencyFilter(incident, currentFilter);
     }
 
@@ -1568,6 +1584,7 @@
         lakecharles: { LCPD: 'Lake Charles Police' },
         sulphur: { SPD: 'Sulphur Police' },
         batonrouge: { LAW: 'Law enforcement' },
+        brpd: { BRPD: 'Baton Rouge Police' },
       };
       const known = names[source]?.[raw];
       if (known) return known;
@@ -1635,7 +1652,7 @@
     }
 
     function plainActivityText(incident, mode = 'live') {
-      if (DELAYED_CLOSED_SOURCES.has(incident?.source)) return 'Closed call · posted 24 hours later';
+      if (DELAYED_CLOSED_SOURCES.has(incident?.source)) return `Closed call · posted ${sourceDelay(incident.source).later}`;
       const activity = incidentActivityState(incident, mode);
       if (activity.veryActive) return 'Happening now · many units';
       if (activity.active) return incident?.source === 'neworleans' ? 'Open call · daily city data' : 'Happening now';
@@ -1681,6 +1698,7 @@
       if (currentSource === 'batonrouge') {
         if (value === 'law') return 'baton rouge law';
         if (value === 'oss') return 'baton rouge oss';
+        if (value === 'police') return 'baton rouge police';
         return 'baton rouge agencies';
       }
       if (currentSource === 'lafayette') {
@@ -1764,6 +1782,7 @@
       const batonRougeCounts = {
         law: 0,
         oss: 0,
+        police: 0,
       };
       const lafayetteCounts = {
         police: 0,
@@ -1793,9 +1812,10 @@
             if (matchesAgencyFilter(inc, 'shvfd')) caddoCounts.shvfd += 1;
             if (matchesAgencyFilter(inc, 'police')) caddoCounts.police += 1;
             if (matchesAgencyFilter(inc, 'sheriff')) caddoCounts.sheriff += 1;
-          } else if (source === 'batonrouge') {
+          } else if (source === 'batonrouge' || source === 'brpd') {
             if (matchesBatonRougeAgencyFilter(inc, 'law')) batonRougeCounts.law += 1;
             if (matchesBatonRougeAgencyFilter(inc, 'oss')) batonRougeCounts.oss += 1;
+            if (matchesBatonRougeAgencyFilter(inc, 'police')) batonRougeCounts.police += 1;
           } else if (source === 'lafayette') {
             if (matchesLafayetteUnitFilter(inc, 'police')) lafayetteCounts.police += 1;
             if (matchesLafayetteUnitFilter(inc, 'sheriff')) lafayetteCounts.sheriff += 1;
@@ -2025,7 +2045,7 @@
 
     function incidentActivityState(incident, mode = 'live') {
       if (DELAYED_CLOSED_SOURCES.has(incident?.source)) {
-        return { active: false, veryActive: false, label: 'CLOSED CALL · 24H PUBLICATION DELAY', className: 'historical' };
+        return { active: false, veryActive: false, label: `CLOSED CALL · ${sourceDelay(incident.source).compact.toUpperCase()} PUBLICATION DELAY`, className: 'historical' };
       }
       const explicitlyActive = Number(incident?.is_active) === 1;
       const explicitlyInactive = incident?.is_active != null && Number(incident.is_active) === 0;
@@ -2224,7 +2244,7 @@
       let popupHtml = `
         <div class="popup-content sev-${sev}">
           <div class="popup-title">${escapeHtml(incident.description || 'Incident')}</div>
-          ${DELAYED_CLOSED_SOURCES.has(incident.source) ? '<div class="popup-detail">Closed police call · 24h publication delay</div>' : ''}
+          ${DELAYED_CLOSED_SOURCES.has(incident.source) ? `<div class="popup-detail">Closed police call · ${sourceDelay(incident.source).compact} publication delay</div>` : ''}
           <div class="popup-detail"><span class="popup-label">Location</span>${escapeHtml(locationStr)}</div>
           ${approximate ? '<div class="popup-detail"><span class="popup-label">Map</span><span class="location-accuracy-note">Approximate Location</span></div>' : ''}
           <div class="popup-detail" title="Source-reported Central time. For undated feeds, date is estimated from first observation."><span class="popup-label">Time</span>${escapeHtml(incidentTimeLabel(incident))}</div>
@@ -2437,7 +2457,7 @@
             <span>${escapeHtml(plainLocationText(incident))}</span>
             ${approximate ? '<span class="location-accuracy-note">Approximate location</span>' : ''}
             ${!hasLocation ? '<span class="location-accuracy-note">Not on map</span>' : ''}
-            ${DELAYED_CLOSED_SOURCES.has(incident.source) ? '<span class="incident-publication">Posted 24 hours later</span>' : ''}
+            ${DELAYED_CLOSED_SOURCES.has(incident.source) ? `<span class="incident-publication">Posted ${sourceDelay(incident.source).later}</span>` : ''}
           </div>
           <div class="incident-meta">
             <span class="incident-agency ${sevClass}">${escapeHtml(severityLabel(sev))}</span>
@@ -2798,7 +2818,7 @@
     const SITE_LINKS_HTML = `
       <nav class="site-links" aria-label="Coverage and reports">
         <a href="/caddo911/">Caddo 911 calls</a>
-        <a href="/coverage/baton-rouge/">Baton Rouge traffic</a>
+        <a href="/coverage/baton-rouge/">Baton Rouge traffic and police calls</a>
         <a href="/coverage/lafayette/">Lafayette 911 traffic</a>
         <a href="/coverage/new-orleans/">New Orleans 911 calls</a>
         <a href="/coverage/lake-charles/">Lake Charles police calls</a>
@@ -2868,7 +2888,7 @@
 
     function applyBatonRougeAgencyFilter(agency) {
       const normalized = String(agency || '').toLowerCase();
-      if (!['all', 'law', 'oss'].includes(normalized)) return;
+      if (!['all', 'law', 'oss', 'police'].includes(normalized)) return;
       const btn = document.querySelector(`.filter-group[data-filter-type="agency-batonrouge"] .filter-btn[data-br-agency="${normalized}"]`);
       const isEmpty = normalized !== 'all' && btn?.classList.contains('empty');
       if (isEmpty) return;
@@ -3874,7 +3894,7 @@
       nearbyList.innerHTML = nearbyRows.map((row, index) => {
         const incident = row.incident;
         const sevClass = getSeverityClass(getSeverity(incident));
-        const delayed = DELAYED_CLOSED_SOURCES.has(incident.source) ? ' · posted 24 hours later' : '';
+        const delayed = DELAYED_CLOSED_SOURCES.has(incident.source) ? ` · posted ${sourceDelay(incident.source).later}` : '';
         return `
           <li>
             <button type="button" class="nearby-item ${sevClass}" data-nearby-index="${index}">
@@ -4107,7 +4127,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.11.0', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.11.1', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);

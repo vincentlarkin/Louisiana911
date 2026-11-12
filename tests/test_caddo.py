@@ -136,6 +136,7 @@ class CaddoTests(unittest.TestCase):
              patch.object(app, 'scrape_neworleans_incidents', return_value=([], None)), \
              patch.object(app, 'scrape_lakecharles_incidents', return_value=([], None)), \
              patch.object(app, 'scrape_sulphur_incidents', return_value=([], None)), \
+             patch.object(app, 'scrape_brpd_incidents', return_value=([], None)), \
              patch.object(app, 'process_incidents') as process:
             with patch.object(app, 'scrape_caddo_incidents', return_value=([], 'September 05 00:10')):
                 app.background_scrape()

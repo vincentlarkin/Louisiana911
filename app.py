@@ -35,6 +35,7 @@ from sources import batonrouge as batonrouge_source
 from sources import neworleans as neworleans_source
 from sources import lakecharles as lakecharles_source
 from sources import sulphur as sulphur_source
+from sources import brpd as brpd_source
 
 app = Flask(__name__, static_folder='public', static_url_path='')
 
@@ -281,6 +282,7 @@ feed_refreshed_by_source: dict[str, str | None] = {
     "neworleans": None,
     "lakecharles": None,
     "sulphur": None,
+    "brpd": None,
 }
 last_scrape_started_at: str | None = None  # ISO UTC
 last_scrape_finished_at: str | None = None  # ISO UTC
@@ -1035,8 +1037,7 @@ def _serve_shared_incident_page(incident: dict):
 
     if payload.get('source') in DELAYED_CLOSED_CALL_SOURCES:
         status_label = 'CLOSED POLICE CALL'
-        city = REPORT_SOURCE_LABELS.get(payload.get('source'), 'Police')
-        summary_lead = f'{city} police call published with a 24-hour delay'
+        summary_lead = _delayed_call_summary(payload.get('source'))
     elif is_active and units >= 5:
         status_label = 'BREAKING - VERY ACTIVE'
         summary_lead = f'Very active public incident with {units} assigned units'
@@ -1504,6 +1505,12 @@ SOURCE_GEO_PROFILES = {
         "lon_min": sulphur_source.LON_MIN, "lon_max": sulphur_source.LON_MAX,
         "center_lat": 30.2366, "center_lon": -93.3774,
         "default_city": "Sulphur", "county": "Calcasieu Parish",
+    },
+    "brpd": {
+        "lat_min": brpd_source.LAT_MIN, "lat_max": brpd_source.LAT_MAX,
+        "lon_min": brpd_source.LON_MIN, "lon_max": brpd_source.LON_MAX,
+        "center_lat": 30.4515, "center_lon": -91.1871,
+        "default_city": "Baton Rouge", "county": "East Baton Rouge Parish",
     },
     "caddo": {
         "lat_min": 32.10,
@@ -2609,12 +2616,30 @@ def scrape_sulphur_incidents():
         return [], None
 
 
-# Police-to-Citizen closed-call feeds: published after a delay, never active,
-# shown as a bounded recent slice. Maps source name to its adapter module.
+def scrape_brpd_incidents():
+    """Import Baton Rouge Police's published calls for service (a day or two old)."""
+    try:
+        return brpd_source.scrape(user_agent=SCRAPER_USER_AGENT, timeout_seconds=20)
+    except Exception as error:
+        log(f"Baton Rouge police import unavailable: {error}")
+        return [], None
+
+
+# Closed police-call feeds: published after a delay, never active, shown as a
+# bounded recent slice. Maps source name to its adapter module.
 DELAYED_CLOSED_CALL_SOURCES = {
     'lakecharles': lakecharles_source,
     'sulphur': sulphur_source,
+    'brpd': brpd_source,
 }
+
+
+def _delayed_call_summary(source: str | None) -> str:
+    """One line saying whose closed call this is and how late it was published."""
+    if source == 'brpd':
+        return 'Baton Rouge police call published a day or two later'
+    city = REPORT_SOURCE_LABELS.get(source, 'Police')
+    return f'{city} police call published with a 24-hour delay'
 
 
 # Backwards compatibility for any old call sites.
@@ -2631,6 +2656,8 @@ SOURCE_MIN_SCRAPE_INTERVAL_SECONDS = {
     'neworleans': 15 * 60,
     'lakecharles': 30 * 60,
     'sulphur': 30 * 60,
+    # The City-Parish loads this layer once a day.
+    'brpd': 60 * 60,
 }
 
 
@@ -3215,6 +3242,7 @@ def background_scrape():
         ('neworleans', 'New Orleans daily calls for service', scrape_neworleans_incidents),
         ('lakecharles', 'Lake Charles closed police calls (24-hour delay)', scrape_lakecharles_incidents),
         ('sulphur', 'Sulphur closed police calls (24-hour delay)', scrape_sulphur_incidents),
+        ('brpd', 'Baton Rouge police calls (1-2 day delay)', scrape_brpd_incidents),
     ]
     for source_name, label, scraper in source_jobs:
         min_interval = SOURCE_MIN_SCRAPE_INTERVAL_SECONDS.get(source_name, 0)
@@ -3274,12 +3302,16 @@ def _record_source_health(source_name: str, error: str | None) -> None:
         log(f"[HEALTH] Could not record {source_name} status: {meta_error}")
 
 
-VALID_SOURCES = {'caddo', 'lafayette', 'batonrouge', 'neworleans', 'lakecharles', 'sulphur'}
+VALID_SOURCES = {'caddo', 'lafayette', 'batonrouge', 'neworleans', 'lakecharles', 'sulphur', 'brpd'}
 
 
 # Source filters that cover more than one feed. Lake Charles and Sulphur are a
-# few miles apart in Calcasieu Parish, so the map shows them as one tab.
-SOURCE_FILTER_GROUPS = {'calcasieu': ('lakecharles', 'sulphur')}
+# few miles apart in Calcasieu Parish, so the map shows them as one tab. The
+# Baton Rouge tab shows the live traffic feed together with BRPD's later calls.
+SOURCE_FILTER_GROUPS = {
+    'calcasieu': ('lakecharles', 'sulphur'),
+    'batonrouge': ('batonrouge', 'brpd'),
+}
 
 
 def _normalize_source_filter(value: str | None) -> str:
@@ -3429,6 +3461,7 @@ REPORT_SOURCE_LABELS = {
     'neworleans': 'New Orleans',
     'lakecharles': 'Lake Charles',
     'sulphur': 'Sulphur',
+    'brpd': 'Baton Rouge Police',
 }
 REPORT_NEARBY_RADII = (0.1, 0.25, 0.5, 1.0, 2.0)
 REPORT_NEARBY_DAYS = (30, 90, 365, 0)  # 0 = everything on record
@@ -3797,7 +3830,7 @@ def coverage_redirect():
 @app.route('/coverage/baton-rouge/')
 def baton_rouge_coverage():
     return _serve_coverage_map('coverage-baton-rouge.html', 'batonrouge', 'Baton Rouge traffic incidents',
-                               'Public traffic incidents in Baton Rouge and East Baton Rouge Parish. Tap a marker for details. This feed does not include every 911 call.')
+                               'Live traffic incidents in Baton Rouge and East Baton Rouge Parish, plus Baton Rouge Police calls posted a day or two later. Tap a marker for details.')
 
 
 @app.route('/coverage/baton-rouge')
@@ -4250,6 +4283,7 @@ def get_status():
         'feed_refreshed_at_neworleans',
         'feed_refreshed_at_lakecharles',
         'feed_refreshed_at_sulphur',
+        'feed_refreshed_at_brpd',
         'last_scrape_started_at',
         'last_scrape_finished_at',
         'scrape_interval_seconds',
@@ -4279,6 +4313,7 @@ def get_status():
         'neworleans': meta.get('feed_refreshed_at_neworleans') or feed_refreshed_by_source.get('neworleans'),
         'lakecharles': meta.get('feed_refreshed_at_lakecharles') or feed_refreshed_by_source.get('lakecharles'),
         'sulphur': meta.get('feed_refreshed_at_sulphur') or feed_refreshed_by_source.get('sulphur'),
+        'brpd': meta.get('feed_refreshed_at_brpd') or feed_refreshed_by_source.get('brpd'),
     }
     refreshed_by_source['calcasieu'] = _latest_delayed_refresh_label(
         refreshed_by_source.get(name) for name in SOURCE_FILTER_GROUPS['calcasieu'])
