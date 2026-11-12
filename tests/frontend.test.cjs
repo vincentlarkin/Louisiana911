@@ -974,11 +974,13 @@ test('self-hosted tiles can live under a path on this site', () => {
   assert.ok(!pattern.test('https://louisiana911.com/base map'));
 });
 
-test('the site opens on the Caddo tab unless a link names another tab or shows a shared call', () => {
+test('the site opens on a linked tab, else the visitor\'s last tab, else Caddo', () => {
   const start = html.indexOf('    const supportedSources =');
   const end = html.indexOf('\n', html.indexOf('    let currentSource =', start));
-  const pick = (sourceFromUrl, sharedIncidentView = null) => {
-    const ctx = vm.createContext({ sourceFromUrl, sharedIncidentView });
+  const pick = (sourceFromUrl, { shared = null, remembered = null } = {}) => {
+    const ctx = vm.createContext({
+      sourceFromUrl, sharedIncidentView: shared, preferences: { get: () => remembered },
+    });
     vm.runInContext(html.slice(start, end), ctx);
     return vm.runInContext('currentSource', ctx);
   };
@@ -986,6 +988,34 @@ test('the site opens on the Caddo tab unless a link names another tab or shows a
   assert.equal(pick('nowhere'), 'caddo');
   assert.equal(pick('all'), 'all');
   assert.equal(pick('sulphur'), 'calcasieu');
-  assert.equal(pick(null, { id: 5 }), 'all');
+  assert.equal(pick(null, { shared: { id: 5 } }), 'all');
+  assert.equal(pick(null, { remembered: 'batonrouge' }), 'batonrouge');
+  assert.equal(pick(null, { remembered: 'all' }), 'all');
+  // A stale or tampered saved value is ignored.
+  assert.equal(pick(null, { remembered: 'sulphur' }), 'caddo');
+  assert.equal(pick(null, { remembered: 'constructor' }), 'caddo');
+  // A link and a shared call both win over the saved tab.
+  assert.equal(pick('lafayette', { remembered: 'batonrouge' }), 'lafayette');
+  assert.equal(pick(null, { shared: { id: 5 }, remembered: 'batonrouge' }), 'all');
   assert.match(html, /class="source-tab active"[^>]*data-source="caddo"/);
+});
+
+test('picking a tab saves it, including the tab a link already opened', () => {
+  const saved = [];
+  const ctx = loadFunctions(['applySourceFilter'], {
+    supportedSources: new Set(['all', 'caddo', 'batonrouge', 'lafayette', 'neworleans', 'calcasieu']),
+    LAST_SOURCE_KEY: 'louisiana911Source', currentSource: 'caddo',
+    preferences: { set: (key, value) => saved.push([key, value]) },
+    document: { querySelectorAll: () => [], getElementById: () => null },
+    coverageIntro: null, historyPage: 1, historyCountsByMonth: new Map(), allHistoryIncidentsForDay: [],
+    leaveSharedIncidentView() {}, syncAgencyFilterGroupsToSource() {}, focusMapOnSourceSelection() {},
+    updateStatus() {}, updateIncidents() {}, loadHistory() {},
+  });
+  ctx.applySourceFilter('batonrouge');
+  ctx.applySourceFilter('sulphur');
+  ctx.applySourceFilter('calcasieu');
+  ctx.applySourceFilter('nowhere');
+  assert.deepEqual(saved.map(([, value]) => value), ['batonrouge', 'calcasieu', 'calcasieu']);
+  assert.ok(saved.every(([key]) => key === 'louisiana911Source'));
+  assert.equal(ctx.currentSource, 'calcasieu');
 });

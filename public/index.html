@@ -1161,9 +1161,13 @@
     const SOURCE_GROUPS = { calcasieu: ['lakecharles', 'sulphur'] };
     const SOURCE_ALIASES = { lakecharles: 'calcasieu', sulphur: 'calcasieu' };
     const initialSource = SOURCE_ALIASES[sourceFromUrl] || sourceFromUrl;
-    // The site opens on Caddo, where the map starts. A shared call can be from
-    // any area, so its page keeps All. ?source=all still opens All.
-    const defaultSource = sharedIncidentView ? 'all' : 'caddo';
+    // A link that names a tab wins. A shared call can be from any area, so its
+    // page opens All. Otherwise the site opens on the tab this visitor last
+    // picked, and on Caddo for a first visit. ?source=all still opens All.
+    const LAST_SOURCE_KEY = 'louisiana911Source';
+    const rememberedSource = preferences.get(LAST_SOURCE_KEY);
+    const defaultSource = sharedIncidentView ? 'all'
+      : supportedSources.has(rememberedSource) ? rememberedSource : 'caddo';
     let currentSource = supportedSources.has(initialSource) ? initialSource : defaultSource;
     let currentLafayetteUnit = 'all'; // 'all' | 'police' | 'sheriff' | 'fire'
     let currentBatonRougeAgency = 'all'; // 'all' | 'law' | 'oss'
@@ -3623,6 +3627,8 @@
       const requested = String(source || '').toLowerCase();
       const normalized = SOURCE_ALIASES[requested] || requested;
       if (!supportedSources.has(normalized)) return;
+      // Only a tab the visitor picks is remembered, never one a link opened.
+      preferences.set(LAST_SOURCE_KEY, normalized);
       if (currentSource === normalized) {
         focusMapOnSourceSelection(normalized);
         return;
@@ -4145,9 +4151,12 @@
     });
     syncAgencyFilterGroupsToSource();
     setViewMode(viewMode, { persist: false });
-    if (sourceFromUrl && supportedSources.has(initialSource) && !sharedIncidentView) {
-      // A city link (e.g. Lake Charles) opens its group's tab but keeps the city's view.
-      const view = SOURCE_MAP_VIEWS[sourceFromUrl] || SOURCE_MAP_VIEWS[currentSource];
+    if (!sharedIncidentView) {
+      // Start the map over the opening tab, whether a link or the visitor's last
+      // pick chose it. A city link (e.g. Lake Charles) opens its group's tab but
+      // keeps the city's view.
+      const linkedView = supportedSources.has(initialSource) ? SOURCE_MAP_VIEWS[sourceFromUrl] : null;
+      const view = linkedView || SOURCE_MAP_VIEWS[currentSource];
       map.setView(view.center, view.zoom, { animate: false });
     }
     
