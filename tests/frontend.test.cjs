@@ -45,7 +45,7 @@ test('parish landing pages open the map despite saved list or mobile defaults an
     for (const mobile of [true, false]) {
       for (const saved of ['list', 'map', null]) {
         const ctx = vm.createContext({
-          preferences: { get: () => saved }, URLSearchParams,
+          preferences: { get: () => saved }, URLSearchParams, sharedIncidentView: null,
           document: { getElementById: () => source ? { dataset: { source } } : null },
           window: { matchMedia: () => ({ matches: mobile }), location: { search: '?source=lakecharles' } },
         });
@@ -972,4 +972,20 @@ test('self-hosted tiles can live under a path on this site', () => {
   assert.ok(pattern.test('https://louisiana911.com/basemap'));
   assert.ok(!pattern.test('https://louisiana911.com/basemap?x=1'));
   assert.ok(!pattern.test('https://louisiana911.com/base map'));
+});
+
+test('the site opens on the Caddo tab unless a link names another tab or shows a shared call', () => {
+  const start = html.indexOf('    const supportedSources =');
+  const end = html.indexOf('\n', html.indexOf('    let currentSource =', start));
+  const pick = (sourceFromUrl, sharedIncidentView = null) => {
+    const ctx = vm.createContext({ sourceFromUrl, sharedIncidentView });
+    vm.runInContext(html.slice(start, end), ctx);
+    return vm.runInContext('currentSource', ctx);
+  };
+  assert.equal(pick(null), 'caddo');
+  assert.equal(pick('nowhere'), 'caddo');
+  assert.equal(pick('all'), 'all');
+  assert.equal(pick('sulphur'), 'calcasieu');
+  assert.equal(pick(null, { id: 5 }), 'all');
+  assert.match(html, /class="source-tab active"[^>]*data-source="caddo"/);
 });

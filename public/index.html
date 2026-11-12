@@ -380,8 +380,8 @@
       </div>
 
       <div class="source-tabs" id="source-tabs" aria-label="Incident source">
-        <button class="source-tab active" type="button" data-source="all" title="Show all sources">All</button>
-        <button class="source-tab" type="button" data-source="caddo" title="Show only Caddo incidents">Caddo</button>
+        <button class="source-tab" type="button" data-source="all" title="Show all sources">All</button>
+        <button class="source-tab active" type="button" data-source="caddo" title="Show only Caddo incidents">Caddo</button>
         <button class="source-tab" type="button" data-source="batonrouge" title="Show only Baton Rouge incidents">Baton Rouge</button>
         <button class="source-tab" type="button" data-source="lafayette" title="Show only Lafayette incidents">Lafayette</button>
         <button class="source-tab" type="button" data-source="neworleans" title="Show the latest published New Orleans calls for service">
@@ -1161,7 +1161,10 @@
     const SOURCE_GROUPS = { calcasieu: ['lakecharles', 'sulphur'] };
     const SOURCE_ALIASES = { lakecharles: 'calcasieu', sulphur: 'calcasieu' };
     const initialSource = SOURCE_ALIASES[sourceFromUrl] || sourceFromUrl;
-    let currentSource = supportedSources.has(initialSource) ? initialSource : 'all';
+    // The site opens on Caddo, where the map starts. A shared call can be from
+    // any area, so its page keeps All. ?source=all still opens All.
+    const defaultSource = sharedIncidentView ? 'all' : 'caddo';
+    let currentSource = supportedSources.has(initialSource) ? initialSource : defaultSource;
     let currentLafayetteUnit = 'all'; // 'all' | 'police' | 'sheriff' | 'fire'
     let currentBatonRougeAgency = 'all'; // 'all' | 'law' | 'oss'
     let currentFilter = 'all';  // Agency filter
