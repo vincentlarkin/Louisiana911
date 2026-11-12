@@ -23,6 +23,7 @@ Current sources include:
 
 - [Caddo Parish 911 Communications District](https://ias.ecc.caddo911.com/All_ActiveEvents.aspx)
 - [City of Baton Rouge traffic incidents](https://city.brla.gov/traffic/incidents.asp)
+- [Baton Rouge Police calls for service](https://www.arcgis.com/home/item.html?id=6794bfcaaabe4576a7a9081e5d7925ae) — BRPD calls from the City-Parish's public layer, posted a day or two later; shown at block level in the Baton Rouge tab.
 - [Lafayette Parish traffic feed](https://lafayette911.org/wp-json/traffic-feed/v1/data)
 - [City of New Orleans / NOPD Calls for Service](https://data.nola.gov/resource/es9j-6y5d.json)
 - [Lake Charles Police-to-Citizen closed calls](https://lakecharles.policetocitizen.com/cadcalls) — LCPD traffic, crime-related and service calls; 24-hour publication delay.

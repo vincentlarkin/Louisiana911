@@ -68,7 +68,7 @@
     <main id="content">
       <section>
         <h2>Baton Rouge traffic incidents</h2>
-        <p>The City of Baton Rouge and Parish of East Baton Rouge publish a list of current traffic incidents. Louisiana911 shows that list on the map. It is a traffic feed, so it does not include most 911 calls or reported crimes.</p>
+        <p>The City of Baton Rouge and Parish of East Baton Rouge publish a list of current traffic incidents. Louisiana911 shows that list on the map as it happens. It is a traffic feed, so on its own it does not include most 911 calls or reported crimes.</p>
         <ul class="list">
           <li><strong>Source:</strong> City-Parish traffic incident list and EBRGIS traffic map layer</li>
           <li><strong>Timing:</strong> Current incidents as published</li>
@@ -79,10 +79,20 @@
         <h3>Map locations</h3>
         <p>Markers use the point from the City-Parish traffic map layer when it has one. Those points are approximate. If an incident hasn't reached the map layer yet, Louisiana911 may place it using a checked address range or cross street. Otherwise it stays in the list as "Map location unavailable" until the layer catches up.</p>
 
-        <h3>Limits</h3>
-        <p>This is not a crime map, police blotter, or 911 call log. An incident leaving the list doesn't tell you how it ended.</p>
+        <h3>Baton Rouge Police calls</h3>
+        <p>The City-Parish also publishes the Baton Rouge Police Department's calls for service, loaded about once a day. Louisiana911 adds those calls to the Baton Rouge map a day or two after they happen. They are never live.</p>
+        <ul class="list">
+          <li><strong>Source:</strong> City-Parish BRPD calls for service layer</li>
+          <li><strong>Timing:</strong> Posted a day or two after the call</li>
+          <li><strong>Includes:</strong> disturbances, alarms, thefts and burglaries, suspicious activity, shots fired, and other police calls inside the Baton Rouge Police area</li>
+          <li><strong>Leaves out:</strong> crashes and other traffic calls, because the live traffic list above already has them, and calls handled only by the Sheriff, fire or EMS</li>
+        </ul>
+        <p>Police calls show the block, not the house number, and the marker is moved to a nearby point. A call is a request for police, not a finding that a crime happened.</p>
 
-        <div class="actions"><a class="button primary" href="/?source=batonrouge">View Baton Rouge incidents</a><a class="button source" href="https://city.brla.gov/traffic/incidents.asp" rel="noopener noreferrer">Official City-Parish feed</a></div>
+        <h3>Limits</h3>
+        <p>The live traffic list is not a crime map, police blotter, or 911 call log, and the police calls arrive too late to be a live one. An incident leaving the list doesn't tell you how it ended.</p>
+
+        <div class="actions"><a class="button primary" href="/?source=batonrouge">View Baton Rouge incidents</a><a class="button source" href="https://city.brla.gov/traffic/incidents.asp" rel="noopener noreferrer">Official City-Parish feed</a><a class="button source" href="https://www.arcgis.com/home/item.html?id=6794bfcaaabe4576a7a9081e5d7925ae" rel="noopener noreferrer">Official police calls layer</a></div>
       </section>
       <nav class="related" aria-label="Related coverage">Other coverage: <a href="/caddo911/">Caddo Parish</a> · <a href="/coverage/lafayette/">Lafayette Parish</a> · <a href="/coverage/new-orleans/">New Orleans</a> · <a href="/coverage/lake-charles/">Lake Charles</a> · <a href="/coverage/sulphur/">Sulphur</a></nav>
     </main>

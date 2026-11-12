@@ -114,7 +114,7 @@ class LiveLifecycleTests(unittest.TestCase):
     def test_baton_rouge_overnight_date_and_delayed_original_dates(self):
         self.assertEqual(app._incident_reported_at(dict(source='batonrouge', time='2350',
                          first_seen='2026-09-05T05:10:00Z')), '2026-09-05T04:50:00+00:00')
-        for source in ['neworleans', 'lakecharles', 'sulphur', 'lafayette']:
+        for source in ['neworleans', 'lakecharles', 'sulphur', 'brpd', 'lafayette']:
             call = dict(source=source, time='2350', first_seen='2026-09-02T04:50:00+00:00', last_seen='2026-09-05T12:00:00Z')
             self.assertEqual(app._incident_reported_at(call), '2026-09-02T04:50:00+00:00')
 
