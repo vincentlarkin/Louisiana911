@@ -675,6 +675,26 @@ HISTORY_UI_SECRET = (
 )
 HISTORY_UI_COOKIE_NAME = 'l911_history_ui'
 HISTORY_UI_REQUEST_HEADER = 'X-Louisiana911-UI'
+# Native apps can't send the browser's Sec-Fetch-* headers, so they trade a
+# session request at /api/app/session for a signed token instead.
+APP_CLIENT_HEADER = 'X-Louisiana911-Client'
+APP_TOKEN_HEADER = 'X-Louisiana911-App-Token'
+APP_PACKAGES = {'android': 'com.louisiana911.app'}
+APP_CLIENT_PATTERN = re.compile(r'^(android)/[0-9][0-9A-Za-z.+-]{0,30}$')
+# header: any request with a valid client header gets a token (beta);
+# play-integrity: the app must also pass a Google Play Integrity verdict;
+# off: the endpoint and app tokens are disabled.
+APP_VERIFY_MODE = os.environ.get('LOUISIANA911_APP_VERIFY', 'header').strip().lower()
+APP_TOKEN_MAX_AGE_SECONDS = int(os.environ.get('LOUISIANA911_APP_TOKEN_MAX_AGE_SECONDS', '86400'))
+APP_CHALLENGE_MAX_AGE_SECONDS = 300
+APP_SESSION_RATE_LIMIT = int(os.environ.get('LOUISIANA911_APP_SESSION_RATE_LIMIT', '10'))
+PLAY_INTEGRITY_CREDENTIALS = os.environ.get('LOUISIANA911_PLAY_INTEGRITY_CREDENTIALS', '').strip()
+_app_token_secret_setting = os.environ.get('LOUISIANA911_APP_TOKEN_SECRET', '').strip()
+APP_TOKEN_SECRET = (
+    _app_token_secret_setting.encode('utf-8')
+    if _app_token_secret_setting
+    else hmac.new(HISTORY_UI_SECRET, b'louisiana911-app-token', hashlib.sha256).digest()
+)
 _report_rate_lock = Lock()
 _report_rate_hits: dict[tuple[str, str], list[float]] = {}
 _history_date_rate_hits: dict[tuple[str, int], dict[str, float]] = {}
@@ -774,6 +794,8 @@ def _valid_history_ui_token(token: str | None) -> bool:
 
 
 def _history_ui_request_guard():
+    if request.headers.get(APP_TOKEN_HEADER) and _valid_app_token():
+        return None
     if request.headers.get(HISTORY_UI_REQUEST_HEADER, '').strip() != 'history':
         return jsonify({'error': 'not_found'}), 404
     if not _valid_history_ui_token(request.cookies.get(HISTORY_UI_COOKIE_NAME)):
@@ -782,6 +804,90 @@ def _history_ui_request_guard():
         _set_history_ui_cookie(response)
         return response
     return None
+
+
+def _app_signature(payload: str) -> str:
+    digest = hmac.new(APP_TOKEN_SECRET, payload.encode('utf-8'), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).decode('ascii').rstrip('=')
+
+
+def _new_app_signed(kind: str, client: str) -> str:
+    payload = f'{kind}:{int(time.time())}:{secrets.token_urlsafe(18)}:{client}'
+    return f'{payload}:{_app_signature(payload)}'
+
+
+def _valid_app_signed(value: str | None, kind: str, max_age: int) -> str | None:
+    """Return the client name for a fresh, correctly signed value, else None."""
+    if not value or max_age <= 0 or len(value) > 200:
+        return None
+    try:
+        version, issued_raw, nonce, client, signature = value.split(':', 4)
+        issued_at = int(issued_raw)
+    except (TypeError, ValueError):
+        return None
+    now = int(time.time())
+    if version != kind or not nonce or client not in APP_PACKAGES:
+        return None
+    if issued_at > now + 60 or now - issued_at > max_age:
+        return None
+    payload = f'{version}:{issued_raw}:{nonce}:{client}'
+    if not hmac.compare_digest(signature, _app_signature(payload)):
+        return None
+    return client
+
+
+def _app_client_from_header() -> str | None:
+    match = APP_CLIENT_PATTERN.match(request.headers.get(APP_CLIENT_HEADER, '').strip())
+    return match.group(1) if match else None
+
+
+def _valid_app_token() -> str | None:
+    if APP_VERIFY_MODE == 'off':
+        return None
+    return _valid_app_signed(
+        request.headers.get(APP_TOKEN_HEADER, '').strip(), 'a1', APP_TOKEN_MAX_AGE_SECONDS
+    )
+
+
+def _app_session_response(client: str):
+    return jsonify({
+        'token': _new_app_signed('a1', client),
+        'expiresIn': APP_TOKEN_MAX_AGE_SECONDS,
+    })
+
+
+def _app_integrity_problem(client: str, body: dict) -> str | None:
+    challenge = body.get('challenge')
+    integrity_token = body.get('integrityToken')
+    if not isinstance(challenge, str) or not isinstance(integrity_token, str) or not integrity_token:
+        return 'integrity_required'
+    if _valid_app_signed(challenge, 'c1', APP_CHALLENGE_MAX_AGE_SECONDS) != client:
+        return 'integrity_required'
+    if not PLAY_INTEGRITY_CREDENTIALS:
+        return 'integrity_unavailable'
+    import app_integrity
+    package = APP_PACKAGES[client]
+    try:
+        payload = app_integrity.decode(package, integrity_token, PLAY_INTEGRITY_CREDENTIALS)
+    except Exception as exc:  # network, auth or Google-side failures
+        print(f'Play Integrity decode failed: {type(exc).__name__}', file=sys.stderr)
+        return 'integrity_unavailable'
+    return app_integrity.verdict_problem(payload, package, challenge)
+
+
+@app.route('/api/app/session', methods=['POST'])
+def app_session():
+    """Swap an app's identity (and, if required, a Play Integrity verdict) for a token."""
+    client = _app_client_from_header()
+    if client is None or APP_VERIFY_MODE not in {'header', 'play-integrity'}:
+        return jsonify({'error': 'not_found'}), 404
+    if APP_VERIFY_MODE == 'play-integrity':
+        body = request.get_json(silent=True)
+        problem = _app_integrity_problem(client, body if isinstance(body, dict) else {})
+        if problem is not None:
+            status = 503 if problem == 'integrity_unavailable' else 401
+            return jsonify({'error': problem, 'challenge': _new_app_signed('c1', client)}), status
+    return _app_session_response(client)
 
 
 def _request_uses_https() -> bool:
@@ -1136,6 +1242,8 @@ def _report_rate_bucket(path: str) -> tuple[str, int] | None:
         return 'incident-history-api', INCIDENT_HISTORY_REQUEST_RATE_LIMIT
     if clean_path == '/api/incidents/history_counts':
         return 'incident-history-counts-api', INCIDENT_OTHER_API_RATE_LIMIT
+    if clean_path == '/api/app/session':
+        return 'app-session-api', APP_SESSION_RATE_LIMIT
     if clean_path == '/api/reports/geocode':
         return 'report-geocode-api', REPORT_GEOCODE_RATE_LIMIT
     if clean_path.startswith('/api/reports/'):
@@ -1269,6 +1377,15 @@ def _api_request_guard():
     fetch_mode = request.headers.get('Sec-Fetch-Mode', '').strip().lower()
     if fetch_site == 'cross-site':
         return jsonify({'error': 'forbidden'}), 403
+
+    # Native app traffic: the session endpoint checks its own header, and
+    # everything else read-only is open to a valid app token.
+    if (request.path.rstrip('/') or '/') == '/api/app/session':
+        return None
+    if request.headers.get(APP_TOKEN_HEADER):
+        if request.method in {'GET', 'HEAD'} and _valid_app_token():
+            return None
+        return jsonify({'error': 'app_token_invalid'}), 401
     if fetch_site != 'same-origin' or fetch_mode == 'navigate':
         return jsonify({'error': 'not_found'}), 404
 
