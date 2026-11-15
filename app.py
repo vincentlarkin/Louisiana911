@@ -20,6 +20,7 @@ import math
 import re
 import json
 import functools
+import gzip
 import html as html_module
 from urllib.parse import urlsplit
 from difflib import SequenceMatcher
@@ -4087,9 +4088,61 @@ def _public_incident(incident):
     return payload
 
 
+# The live list changes once per collector scrape (about a minute), but every
+# visitor asks for it every 30-60 seconds. Build it once per scrape (or at most
+# every ACTIVE_CACHE_MAX_AGE seconds) and hand everyone the same bytes, gzipped
+# for clients that accept it, with an ETag so unchanged polls get a bodiless 304.
+ACTIVE_CACHE_MAX_AGE = 20
+_active_cache: dict[str, tuple] = {}
+_active_cache_lock = Lock()
+
+
+def _scrape_stamp() -> str | None:
+    """When the collector last finished, from the shared database (a tiny query)."""
+    try:
+        conn = db_connect()
+        try:
+            row = conn.execute("SELECT value FROM meta WHERE key = 'last_scrape_finished_at'").fetchone()
+        finally:
+            conn.close()
+        return row[0] if row else None
+    except sqlite3.Error:
+        return None
+
+
+def _active_cache_entry(source_filter: str) -> tuple:
+    stamp = _scrape_stamp()
+    entry = _active_cache.get(source_filter)
+    fresh = lambda e: e is not None and e[0] == stamp and time.monotonic() - e[1] < ACTIVE_CACHE_MAX_AGE
+    if fresh(entry):
+        return entry
+    with _active_cache_lock:
+        entry = _active_cache.get(source_filter)
+        if fresh(entry):
+            return entry
+        body = app.json.dumps(_active_incident_payload(source_filter)).encode('utf-8')
+        entry = (stamp, time.monotonic(), body, gzip.compress(body, compresslevel=6),
+                 '"' + hashlib.sha256(body).hexdigest()[:24] + '"')
+        _active_cache[source_filter] = entry
+        return entry
+
+
 @app.route('/api/incidents/active')
 def get_active_incidents():
-    source_filter = _normalize_source_filter(request.args.get('source'))
+    _, _, body, gzipped, etag = _active_cache_entry(_normalize_source_filter(request.args.get('source')))
+    if etag in [tag.strip() for tag in request.headers.get('If-None-Match', '').split(',')]:
+        response = app.response_class(status=304)
+    elif 'gzip' in request.headers.get('Accept-Encoding', '').lower():
+        response = app.response_class(gzipped, mimetype='application/json')
+        response.headers['Content-Encoding'] = 'gzip'
+    else:
+        response = app.response_class(body, mimetype='application/json')
+    response.headers['ETag'] = etag
+    response.headers['Vary'] = 'Accept-Encoding'
+    return response
+
+
+def _active_incident_payload(source_filter: str) -> list:
     conn = db_connect(row_factory=True)
     cursor = conn.cursor()
     has_source_column = _ensure_incidents_source_column(conn)
@@ -4125,7 +4178,7 @@ def get_active_incidents():
     if source_filter != 'all':
         incidents = [incident for incident in incidents if _incident_matches_source_filter(incident, source_filter)]
     conn.close()
-    return jsonify([_public_incident(incident) for incident in incidents])
+    return [_public_incident(incident) for incident in incidents]
 
 def _query_history_candidates(conn, bounds, source_filter, candidate_limit, *, archived=False):
     """Read only the prefix needed to merge one page across live/archive databases."""

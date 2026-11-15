@@ -133,6 +133,9 @@ class LakeCharlesDatabaseTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         db_patch = patch.object(app, 'DB_PATH', os.path.join(self.directory.name, 'live.db'))
         db_patch.start()
+        # Each test writes its own calls; don't reuse another test's cached live list.
+        app._active_cache.clear()
+        self.addCleanup(app._active_cache.clear)
         self.addCleanup(db_patch.stop)
         app.init_db()
 
