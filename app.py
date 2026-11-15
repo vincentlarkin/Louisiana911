@@ -681,10 +681,11 @@ HISTORY_UI_REQUEST_HEADER = 'X-Louisiana911-UI'
 # session request at /api/app/session for a signed token instead.
 APP_CLIENT_HEADER = 'X-Louisiana911-Client'
 APP_TOKEN_HEADER = 'X-Louisiana911-App-Token'
-APP_PACKAGES = {'android': 'com.louisiana911.app'}
-APP_CLIENT_PATTERN = re.compile(r'^(android)/[0-9][0-9A-Za-z.+-]{0,30}$')
+APP_PACKAGES = {'android': 'com.louisiana911.app', 'ios': 'com.louisiana911.app'}
+APP_CLIENT_PATTERN = re.compile(r'^(android|ios)/[0-9][0-9A-Za-z.+-]{0,30}$')
 # header: any request with a valid client header gets a live-only token (beta);
-# play-integrity: the app must also pass a Google Play Integrity verdict;
+# play-integrity: the app must also prove itself: a Google Play Integrity
+# verdict on Android, Apple App Attest on iOS (see app_attest.py);
 # off: the endpoint and app tokens are disabled.
 # Token kinds: a1 = header check only, a2 = passed Play Integrity. Only a2 may
 # read past calls and reports, so faking the client header never opens the
@@ -698,6 +699,11 @@ APP_CHALLENGE_MAX_AGE_SECONDS = 300
 # address; each session still needs a Play Integrity verdict in that mode.
 APP_SESSION_RATE_LIMIT = int(os.environ.get('LOUISIANA911_APP_SESSION_RATE_LIMIT', '30'))
 PLAY_INTEGRITY_CREDENTIALS = os.environ.get('LOUISIANA911_PLAY_INTEGRITY_CREDENTIALS', '').strip()
+# iOS: the Apple Developer team ID the app is signed with. Development-signed
+# builds (run from Xcode) only pass when LOUISIANA911_APP_ATTEST_ALLOW_DEV=1;
+# TestFlight and App Store builds always use Apple's production environment.
+APPLE_TEAM_ID = os.environ.get('LOUISIANA911_APPLE_TEAM_ID', '').strip()
+APP_ATTEST_ALLOW_DEV = os.environ.get('LOUISIANA911_APP_ATTEST_ALLOW_DEV', '').strip().lower() in {'1', 'true', 'yes'}
 _app_token_secret_setting = os.environ.get('LOUISIANA911_APP_TOKEN_SECRET', '').strip()
 APP_TOKEN_SECRET = (
     _app_token_secret_setting.encode('utf-8')
@@ -883,10 +889,12 @@ def _app_session_response(client: str, kind: str):
 
 def _app_integrity_problem(client: str, body: dict) -> str | None:
     challenge = body.get('challenge')
-    integrity_token = body.get('integrityToken')
-    if not isinstance(challenge, str) or not isinstance(integrity_token, str) or not integrity_token:
+    if not isinstance(challenge, str) or _valid_app_signed(challenge, 'c1', APP_CHALLENGE_MAX_AGE_SECONDS) != client:
         return 'integrity_required'
-    if _valid_app_signed(challenge, 'c1', APP_CHALLENGE_MAX_AGE_SECONDS) != client:
+    if client == 'ios':
+        return _app_attest_problem(body, challenge)
+    integrity_token = body.get('integrityToken')
+    if not isinstance(integrity_token, str) or not integrity_token:
         return 'integrity_required'
     if not PLAY_INTEGRITY_CREDENTIALS:
         return 'integrity_unavailable'
@@ -900,9 +908,26 @@ def _app_integrity_problem(client: str, body: dict) -> str | None:
     return app_integrity.verdict_problem(payload, package, challenge)
 
 
+def _app_attest_problem(body: dict, challenge: str) -> str | None:
+    if not APPLE_TEAM_ID:
+        return 'integrity_unavailable'
+    import app_attest
+    conn = db_connect()
+    try:
+        return app_attest.check(
+            conn, body, challenge, APPLE_TEAM_ID, APP_PACKAGES['ios'],
+            allow_development=APP_ATTEST_ALLOW_DEV,
+        )
+    except sqlite3.Error as exc:
+        print(f'App Attest storage failed: {type(exc).__name__}', file=sys.stderr)
+        return 'integrity_unavailable'
+    finally:
+        conn.close()
+
+
 @app.route('/api/app/session', methods=['POST'])
 def app_session():
-    """Swap an app's identity (and, if required, a Play Integrity verdict) for a token."""
+    """Swap an app's identity (and, if required, Play Integrity / App Attest proof) for a token."""
     client = _app_client_from_header()
     if client is None or APP_VERIFY_MODE not in {'header', 'play-integrity'}:
         return jsonify({'error': 'not_found'}), 404
