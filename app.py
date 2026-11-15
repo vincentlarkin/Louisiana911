@@ -694,7 +694,9 @@ APP_LIVE_ONLY_PATHS = {'/api/incidents/active', '/api/status', '/api/weather'}
 APP_VERIFY_MODE = os.environ.get('LOUISIANA911_APP_VERIFY', 'header').strip().lower()
 APP_TOKEN_MAX_AGE_SECONDS = int(os.environ.get('LOUISIANA911_APP_TOKEN_MAX_AGE_SECONDS', '86400'))
 APP_CHALLENGE_MAX_AGE_SECONDS = 300
-APP_SESSION_RATE_LIMIT = int(os.environ.get('LOUISIANA911_APP_SESSION_RATE_LIMIT', '10'))
+# Per IP. Kept above a handful because carrier NAT puts many phones behind one
+# address; each session still needs a Play Integrity verdict in that mode.
+APP_SESSION_RATE_LIMIT = int(os.environ.get('LOUISIANA911_APP_SESSION_RATE_LIMIT', '30'))
 PLAY_INTEGRITY_CREDENTIALS = os.environ.get('LOUISIANA911_PLAY_INTEGRITY_CREDENTIALS', '').strip()
 _app_token_secret_setting = os.environ.get('LOUISIANA911_APP_TOKEN_SECRET', '').strip()
 APP_TOKEN_SECRET = (
@@ -1319,13 +1321,19 @@ def _persistent_history_date_limit(client_ip, date):
 
 
 def _rate_limit_identities() -> list[str]:
-    """Who a request counts against: its IP, plus its app token when it has one.
-    Counting the token too means a token moved between IP addresses keeps one budget."""
+    """Who a request counts against.
+
+    A Play Integrity-verified app token (a2) is one genuine install, so it gets
+    its own budget wherever it connects from. That matters on mobile networks,
+    where carriers put thousands of phones behind one shared IP address (CGNAT).
+    Everything else counts against its IP, plus a header-only token if present,
+    so a token moved between addresses keeps one budget."""
+    token = _app_token() if request.headers.get(APP_TOKEN_HEADER) else None
+    if token and token[1] == 'a2':
+        return [f'app:{token[2]}']
     identities = [_client_ip_for_rate_limit()]
-    if request.headers.get(APP_TOKEN_HEADER):
-        token = _app_token()
-        if token:
-            identities.append(f'app:{token[2]}')
+    if token:
+        identities.append(f'app:{token[2]}')
     return identities
 
 
