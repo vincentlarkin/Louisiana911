@@ -1502,6 +1502,7 @@ def _security_headers(resp):
         # times a minute however many people are watching. Browsers still
         # revalidate every time (max-age=0). Errors and refusals stay no-store.
         resp.headers['Cache-Control'] = f'public, max-age=0, s-maxage={EDGE_CACHE_SECONDS}'
+        resp.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
     elif request.path.startswith('/api/'):
         resp.headers['Cache-Control'] = 'no-store, private'
         resp.headers['Pragma'] = 'no-cache'
