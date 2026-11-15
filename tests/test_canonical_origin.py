@@ -487,7 +487,8 @@ class CanonicalOriginTests(unittest.TestCase):
         )
 
         self.assertEqual(200, active.status_code)
-        self.assertEqual('no-store, private', active.headers['Cache-Control'])
+        # The live list is shared and edge-cached briefly; everything else stays private.
+        self.assertEqual('public, max-age=0, s-maxage=15', active.headers['Cache-Control'])
         self.assertEqual('noindex, nofollow, noarchive', active.headers['X-Robots-Tag'])
         self.assertEqual(404, direct_history.status_code)
         self.assertNotIn('l911_history_ui=', non_navigation_shell.headers.get('Set-Cookie', ''))
