@@ -75,6 +75,26 @@ class AppSessionTests(unittest.TestCase):
         self.assertNotEqual(429, codes[0])
         self.assertEqual(429, codes[2])
 
+    def test_verified_installs_behind_one_carrier_ip_get_their_own_budgets(self):
+        with patch.object(app, 'REPORT_API_RATE_LIMIT', 2), patch.object(app, 'TRUSTED_PROXY_HOPS', 0):
+            codes = []
+            for _ in range(4):
+                token = app._new_app_signed('a2', 'android')  # a different phone each time
+                codes.append(self.client.get('/api/reports/summary',
+                                             headers=dict(CLIENT, **{'X-Louisiana911-App-Token': token}),
+                                             environ_base={'REMOTE_ADDR': '198.51.100.7'}).status_code)
+        self.assertNotIn(429, codes)
+
+    def test_header_only_tokens_still_share_the_ip_budget(self):
+        with patch.object(app, 'INCIDENT_ACTIVE_API_RATE_LIMIT', 2), patch.object(app, 'TRUSTED_PROXY_HOPS', 0):
+            codes = []
+            for _ in range(3):
+                token = app._new_app_signed('a1', 'android')
+                codes.append(self.client.get('/api/incidents/active',
+                                             headers=dict(CLIENT, **{'X-Louisiana911-App-Token': token}),
+                                             environ_base={'REMOTE_ADDR': '198.51.100.8'}).status_code)
+        self.assertEqual(429, codes[2])
+
     def test_bad_expired_or_tampered_tokens_get_401(self):
         token = self.token()
         tampered = token[:-2] + ('AA' if not token.endswith('AA') else 'BB')
