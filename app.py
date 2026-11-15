@@ -29,6 +29,7 @@ from flask import Flask, abort, jsonify, redirect, request, send_from_directory
 from geopy.geocoders import Nominatim
 from apscheduler.schedulers.background import BackgroundScheduler
 from zoneinfo import ZoneInfo
+import weather
 from sources import caddo as caddo_source
 from sources import lafayette as lafayette_source
 from sources import batonrouge as batonrouge_source
@@ -688,7 +689,7 @@ APP_CLIENT_PATTERN = re.compile(r'^(android)/[0-9][0-9A-Za-z.+-]{0,30}$')
 # read past calls and reports, so faking the client header never opens the
 # archive. In play-integrity mode a1 tokens stop working altogether.
 APP_TOKEN_KINDS_BY_MODE = {'header': ('a1', 'a2'), 'play-integrity': ('a2',)}
-APP_LIVE_ONLY_PATHS = {'/api/incidents/active', '/api/status'}
+APP_LIVE_ONLY_PATHS = {'/api/incidents/active', '/api/status', '/api/weather'}
 APP_VERIFY_MODE = os.environ.get('LOUISIANA911_APP_VERIFY', 'header').strip().lower()
 APP_TOKEN_MAX_AGE_SECONDS = int(os.environ.get('LOUISIANA911_APP_TOKEN_MAX_AGE_SECONDS', '86400'))
 APP_CHALLENGE_MAX_AGE_SECONDS = 300
@@ -4402,6 +4403,12 @@ def _latest_delayed_refresh_label(labels) -> str | None:
         if best is None or parsed > best:
             best, best_label = parsed, label
     return best_label
+
+
+@app.route('/api/weather')
+def get_weather():
+    """Latest NWS conditions per covered area (a few hundred bytes, cached 15 minutes)."""
+    return jsonify({'areas': weather.current()})
 
 
 @app.route('/api/status')
