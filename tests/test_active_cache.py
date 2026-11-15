@@ -32,7 +32,7 @@ class ActiveCacheTests(unittest.TestCase):
             self.assertEqual('gzip', zipped.headers['Content-Encoding'])
             self.assertEqual(calls, json.loads(gzip.decompress(zipped.data)))
             self.assertEqual(plain.headers['ETag'], zipped.headers['ETag'])
-            self.assertIn('no-store', plain.headers['Cache-Control'])
+            self.assertEqual('public, max-age=0, s-maxage=15', plain.headers['Cache-Control'])
 
     def test_new_scrape_rebuilds(self):
         with patch.object(app, '_active_incident_payload', return_value=[]) as build:
@@ -50,8 +50,14 @@ class ActiveCacheTests(unittest.TestCase):
             self.assertEqual(304, again.status_code)
             self.assertEqual(b'', again.data)
 
-    def test_guard_still_applies(self):
-        self.assertEqual(404, self.client.get('/api/incidents/active', headers={'Host': 'localhost'}).status_code)
+    def test_guard_still_applies_and_refusals_are_never_cached(self):
+        refused = self.client.get('/api/incidents/active', headers={'Host': 'localhost'})
+        self.assertEqual(404, refused.status_code)
+        self.assertIn('no-store', refused.headers['Cache-Control'])
+
+    def test_other_api_stays_private(self):
+        r = self.client.get('/api/status', headers=BROWSER)
+        self.assertIn('no-store', r.headers['Cache-Control'])
 
 
 if __name__ == '__main__':

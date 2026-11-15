@@ -1496,6 +1496,12 @@ def _security_headers(resp):
     }
     if request.path in versioned_shell_assets and request.args.get('v'):
         resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    elif request.path == '/api/incidents/active' and resp.status_code in (200, 304):
+        # The live list is the same for everyone. Let Cloudflare keep it for
+        # EDGE_CACHE_SECONDS so each of its data centers asks us about four
+        # times a minute however many people are watching. Browsers still
+        # revalidate every time (max-age=0). Errors and refusals stay no-store.
+        resp.headers['Cache-Control'] = f'public, max-age=0, s-maxage={EDGE_CACHE_SECONDS}'
     elif request.path.startswith('/api/'):
         resp.headers['Cache-Control'] = 'no-store, private'
         resp.headers['Pragma'] = 'no-cache'
@@ -4101,6 +4107,7 @@ def _public_incident(incident):
 # every ACTIVE_CACHE_MAX_AGE seconds) and hand everyone the same bytes, gzipped
 # for clients that accept it, with an ETag so unchanged polls get a bodiless 304.
 ACTIVE_CACHE_MAX_AGE = 20
+EDGE_CACHE_SECONDS = int(os.environ.get('LOUISIANA911_EDGE_CACHE_SECONDS', '15'))
 _active_cache: dict[str, tuple] = {}
 _active_cache_lock = Lock()
 
