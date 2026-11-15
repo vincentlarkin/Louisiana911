@@ -681,9 +681,14 @@ APP_CLIENT_HEADER = 'X-Louisiana911-Client'
 APP_TOKEN_HEADER = 'X-Louisiana911-App-Token'
 APP_PACKAGES = {'android': 'com.louisiana911.app'}
 APP_CLIENT_PATTERN = re.compile(r'^(android)/[0-9][0-9A-Za-z.+-]{0,30}$')
-# header: any request with a valid client header gets a token (beta);
+# header: any request with a valid client header gets a live-only token (beta);
 # play-integrity: the app must also pass a Google Play Integrity verdict;
 # off: the endpoint and app tokens are disabled.
+# Token kinds: a1 = header check only, a2 = passed Play Integrity. Only a2 may
+# read past calls and reports, so faking the client header never opens the
+# archive. In play-integrity mode a1 tokens stop working altogether.
+APP_TOKEN_KINDS_BY_MODE = {'header': ('a1', 'a2'), 'play-integrity': ('a2',)}
+APP_LIVE_ONLY_PATHS = {'/api/incidents/active', '/api/status'}
 APP_VERIFY_MODE = os.environ.get('LOUISIANA911_APP_VERIFY', 'header').strip().lower()
 APP_TOKEN_MAX_AGE_SECONDS = int(os.environ.get('LOUISIANA911_APP_TOKEN_MAX_AGE_SECONDS', '86400'))
 APP_CHALLENGE_MAX_AGE_SECONDS = 300
@@ -794,8 +799,11 @@ def _valid_history_ui_token(token: str | None) -> bool:
 
 
 def _history_ui_request_guard():
-    if request.headers.get(APP_TOKEN_HEADER) and _valid_app_token():
-        return None
+    if request.headers.get(APP_TOKEN_HEADER):
+        token = _app_token()
+        if token and _app_token_reaches(request.path, token[1]):
+            return None
+        return jsonify({'error': 'app_integrity_required'}), 403
     if request.headers.get(HISTORY_UI_REQUEST_HEADER, '').strip() != 'history':
         return jsonify({'error': 'not_found'}), 404
     if not _valid_history_ui_token(request.cookies.get(HISTORY_UI_COOKIE_NAME)):
@@ -816,8 +824,8 @@ def _new_app_signed(kind: str, client: str) -> str:
     return f'{payload}:{_app_signature(payload)}'
 
 
-def _valid_app_signed(value: str | None, kind: str, max_age: int) -> str | None:
-    """Return the client name for a fresh, correctly signed value, else None."""
+def _parse_app_signed(value: str | None, kinds: tuple[str, ...], max_age: int) -> tuple[str, str, str] | None:
+    """Return (client, kind, nonce) for a fresh, correctly signed value, else None."""
     if not value or max_age <= 0 or len(value) > 200:
         return None
     try:
@@ -826,14 +834,20 @@ def _valid_app_signed(value: str | None, kind: str, max_age: int) -> str | None:
     except (TypeError, ValueError):
         return None
     now = int(time.time())
-    if version != kind or not nonce or client not in APP_PACKAGES:
+    if version not in kinds or not nonce or client not in APP_PACKAGES:
         return None
     if issued_at > now + 60 or now - issued_at > max_age:
         return None
     payload = f'{version}:{issued_raw}:{nonce}:{client}'
     if not hmac.compare_digest(signature, _app_signature(payload)):
         return None
-    return client
+    return client, version, nonce
+
+
+def _valid_app_signed(value: str | None, kind: str, max_age: int) -> str | None:
+    """Return the client name for a fresh, correctly signed value, else None."""
+    parsed = _parse_app_signed(value, (kind,), max_age)
+    return parsed[0] if parsed else None
 
 
 def _app_client_from_header() -> str | None:
@@ -841,17 +855,24 @@ def _app_client_from_header() -> str | None:
     return match.group(1) if match else None
 
 
-def _valid_app_token() -> str | None:
-    if APP_VERIFY_MODE == 'off':
+def _app_token() -> tuple[str, str, str] | None:
+    """(client, kind, nonce) for the request's app token, if it is valid in this mode."""
+    kinds = APP_TOKEN_KINDS_BY_MODE.get(APP_VERIFY_MODE)
+    if not kinds:
         return None
-    return _valid_app_signed(
-        request.headers.get(APP_TOKEN_HEADER, '').strip(), 'a1', APP_TOKEN_MAX_AGE_SECONDS
+    return _parse_app_signed(
+        request.headers.get(APP_TOKEN_HEADER, '').strip(), kinds, APP_TOKEN_MAX_AGE_SECONDS
     )
 
 
-def _app_session_response(client: str):
+def _app_token_reaches(path: str, kind: str) -> bool:
+    """Header-only tokens see live calls; past calls and reports need Play Integrity."""
+    return kind == 'a2' or (path.rstrip('/') or '/') in APP_LIVE_ONLY_PATHS
+
+
+def _app_session_response(client: str, kind: str):
     return jsonify({
-        'token': _new_app_signed('a1', client),
+        'token': _new_app_signed(kind, client),
         'expiresIn': APP_TOKEN_MAX_AGE_SECONDS,
     })
 
@@ -887,7 +908,8 @@ def app_session():
         if problem is not None:
             status = 503 if problem == 'integrity_unavailable' else 401
             return jsonify({'error': problem, 'challenge': _new_app_signed('c1', client)}), status
-    return _app_session_response(client)
+        return _app_session_response(client, 'a2')
+    return _app_session_response(client, 'a1')
 
 
 def _request_uses_https() -> bool:
@@ -1294,6 +1316,17 @@ def _persistent_history_date_limit(client_ip, date):
             conn.close()
 
 
+def _rate_limit_identities() -> list[str]:
+    """Who a request counts against: its IP, plus its app token when it has one.
+    Counting the token too means a token moved between IP addresses keeps one budget."""
+    identities = [_client_ip_for_rate_limit()]
+    if request.headers.get(APP_TOKEN_HEADER):
+        token = _app_token()
+        if token:
+            identities.append(f'app:{token[2]}')
+    return identities
+
+
 def _check_report_rate_limit():
     if REPORT_RATE_WINDOW_SECONDS <= 0:
         return None
@@ -1305,20 +1338,21 @@ def _check_report_rate_limit():
         if bounds:
             date = _central_date_key(bounds[0])
             now = time.monotonic()
-            client_ip = _client_ip_for_rate_limit()
+            identities = _rate_limit_identities()
             windows = [(REPORT_RATE_WINDOW_SECONDS, INCIDENT_HISTORY_API_RATE_LIMIT)]
             if ACCESS_LIMIT_DB:
-                quota_response = _persistent_history_date_limit(client_ip, date)
-                if quota_response is not None:
-                    return quota_response
+                for identity in identities:
+                    quota_response = _persistent_history_date_limit(identity, date)
+                    if quota_response is not None:
+                        return quota_response
             else:
                 windows.extend(((3600, HISTORY_HOURLY_DATE_LIMIT), (86400, HISTORY_DAILY_DATE_LIMIT)))
             with _report_rate_lock:
                 pending = {}
-                for seconds, maximum in windows:
+                for (seconds, maximum), identity in ((w, i) for w in windows for i in identities):
                     if maximum <= 0:
                         continue
-                    key = (client_ip, seconds)
+                    key = (identity, seconds)
                     dates = {day: stamp for day, stamp in _history_date_rate_hits.get(key, {}).items()
                              if stamp > now - seconds}
                     if date not in dates and len(dates) >= maximum:
@@ -1344,18 +1378,20 @@ def _check_report_rate_limit():
 
     now = time.monotonic()
     cutoff = now - REPORT_RATE_WINDOW_SECONDS
-    key = (_client_ip_for_rate_limit(), scope)
+    keys = [(identity, scope) for identity in _rate_limit_identities()]
 
     with _report_rate_lock:
-        hits = [stamp for stamp in _report_rate_hits.get(key, []) if stamp > cutoff]
-        if len(hits) >= limit:
-            oldest = min(hits) if hits else now
-            retry_after = max(1, int(math.ceil(REPORT_RATE_WINDOW_SECONDS - (now - oldest))))
-            _report_rate_hits[key] = hits
-            return _rate_limited_response(retry_after)
+        recent = {key: [stamp for stamp in _report_rate_hits.get(key, []) if stamp > cutoff] for key in keys}
+        for key, hits in recent.items():
+            if len(hits) >= limit:
+                oldest = min(hits) if hits else now
+                retry_after = max(1, int(math.ceil(REPORT_RATE_WINDOW_SECONDS - (now - oldest))))
+                _report_rate_hits.update(recent)
+                return _rate_limited_response(retry_after)
 
-        hits.append(now)
-        _report_rate_hits[key] = hits
+        for key, hits in recent.items():
+            hits.append(now)
+            _report_rate_hits[key] = hits
 
         # Opportunistic cleanup so the dict does not grow forever.
         if len(_report_rate_hits) > 2000:
@@ -1383,9 +1419,12 @@ def _api_request_guard():
     if (request.path.rstrip('/') or '/') == '/api/app/session':
         return None
     if request.headers.get(APP_TOKEN_HEADER):
-        if request.method in {'GET', 'HEAD'} and _valid_app_token():
-            return None
-        return jsonify({'error': 'app_token_invalid'}), 401
+        token = _app_token() if request.method in {'GET', 'HEAD'} else None
+        if token is None:
+            return jsonify({'error': 'app_token_invalid'}), 401
+        if not _app_token_reaches(request.path, token[1]):
+            return jsonify({'error': 'app_integrity_required'}), 403
+        return None
     if fetch_site != 'same-origin' or fetch_mode == 'navigate':
         return jsonify({'error': 'not_found'}), 404
 

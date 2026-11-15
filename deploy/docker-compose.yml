@@ -1,6 +1,7 @@
 # Production stack. The deploy script runs this from the app directory, so
 # ./repo is the release, ./data the SQLite files, ./.louisiana911.env the
-# secrets and ./.env the host-specific settings (neither is committed).
+# secrets, ./secrets key files and ./.env the host-specific settings (none
+# of them committed).
 name: la911
 
 x-app: &app
@@ -27,6 +28,11 @@ services:
     command: ["gunicorn", "-w", "1", "--threads", "8", "-b", "0.0.0.0:3911", "app:app"]
     env_file:
       - ./.louisiana911.env
+    volumes:
+      - ./data:/data
+      # Read-only keys (the Play Integrity service account), kept out of ./data
+      # so they never land in the data backups.
+      - ./secrets:/secrets:ro
     expose:
       - "3911"
     healthcheck:

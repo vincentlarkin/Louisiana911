@@ -46,11 +46,34 @@ class AppSessionTests(unittest.TestCase):
                              headers=dict(CLIENT, **{'X-Louisiana911-App-Token': token}))
         self.assertEqual(200, ok.status_code)
 
-    def test_token_opens_history_without_the_page_cookie(self):
+    def test_header_only_token_cannot_read_the_archive(self):
         token = self.token()
+        self.assertTrue(token.startswith('a1:'))
+        headers = dict(CLIENT, **{'X-Louisiana911-App-Token': token})
+        for path in ('/api/incidents/history?date=2026-11-01', '/api/incidents/history_counts?month=2026-11',
+                     '/api/reports/summary', '/api/reports/nearby?lat=32.5&lon=-93.75&radius=1&days=30',
+                     '/api/stats'):
+            response = self.client.get(path, headers=headers)
+            self.assertEqual(403, response.status_code, path)
+            self.assertEqual('app_integrity_required', response.get_json()['error'], path)
+
+    def test_verified_token_opens_history_without_the_page_cookie(self):
+        token = app._new_app_signed('a2', 'android')
         response = self.client.get('/api/incidents/history?date=2026-11-01',
                                    headers=dict(CLIENT, **{'X-Louisiana911-App-Token': token}))
-        self.assertNotEqual(404, response.status_code)
+        self.assertEqual(200, response.status_code)
+
+    def test_limits_follow_the_token_across_addresses(self):
+        token = app._new_app_signed('a2', 'android')
+        headers = dict(CLIENT, **{'X-Louisiana911-App-Token': token})
+        with patch.object(app, 'REPORT_API_RATE_LIMIT', 2), patch.object(app, 'TRUSTED_PROXY_HOPS', 0):
+            codes = [
+                self.client.get('/api/reports/summary', headers=headers,
+                                environ_base={'REMOTE_ADDR': f'203.0.113.{n}'}).status_code
+                for n in range(1, 4)
+            ]
+        self.assertNotEqual(429, codes[0])
+        self.assertEqual(429, codes[2])
 
     def test_bad_expired_or_tampered_tokens_get_401(self):
         token = self.token()
@@ -104,6 +127,7 @@ class PlayIntegrityModeTests(unittest.TestCase):
             },
             'appIntegrity': {'appRecognitionVerdict': 'PLAY_RECOGNIZED'},
             'deviceIntegrity': {'deviceRecognitionVerdict': ['MEETS_DEVICE_INTEGRITY']},
+            'accountDetails': {'appLicensingVerdict': 'LICENSED'},
         }
         for key, value in overrides.items():
             payload[key] = value
@@ -123,6 +147,31 @@ class PlayIntegrityModeTests(unittest.TestCase):
                                         json={'challenge': challenge, 'integrityToken': 'abc'})
         self.assertEqual(200, response.status_code)
         decode.assert_called_once_with('com.louisiana911.app', 'abc', '/x.json')
+        token = response.get_json()['token']
+        self.assertTrue(token.startswith('a2:'))
+        history = self.client.get('/api/incidents/history?date=2026-11-01',
+                                  headers=dict(CLIENT, **{'X-Louisiana911-App-Token': token}))
+        self.assertEqual(200, history.status_code)
+
+    def test_header_only_tokens_stop_working(self):
+        old = app._new_app_signed('a1', 'android')
+        response = self.client.get('/api/incidents/active',
+                                   headers=dict(CLIENT, **{'X-Louisiana911-App-Token': old}))
+        self.assertEqual(401, response.status_code)
+
+    def refused(self, challenge, verdict):
+        with patch.object(app_integrity, 'decode', return_value=verdict):
+            response = self.client.post('/api/app/session', headers=CLIENT,
+                                        json={'challenge': challenge, 'integrityToken': 'abc'})
+        self.assertEqual(401, response.status_code)
+        return response.get_json()['error']
+
+    def test_weak_device_or_copied_app_is_refused(self):
+        challenge = self.client.post('/api/app/session', headers=CLIENT).get_json()['challenge']
+        basic_only = self.verdict(challenge, deviceIntegrity={'deviceRecognitionVerdict': ['MEETS_BASIC_INTEGRITY']})
+        self.assertEqual('device_integrity', self.refused(challenge, basic_only))
+        unlicensed = self.verdict(challenge, accountDetails={'appLicensingVerdict': 'UNLICENSED'})
+        self.assertEqual('unlicensed', self.refused(challenge, unlicensed))
 
     def test_sideloaded_app_is_refused(self):
         challenge = self.client.post('/api/app/session', headers=CLIENT).get_json()['challenge']

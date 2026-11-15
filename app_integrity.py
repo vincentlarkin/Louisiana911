@@ -2,8 +2,7 @@
 
 Only used when LOUISIANA911_APP_VERIFY=play-integrity. Decoding goes through
 Google's server API with a service account that has the Play Integrity API
-enabled; set LOUISIANA911_PLAY_INTEGRITY_CREDENTIALS to its JSON key file and
-install google-auth (not in requirements.txt until this mode is switched on).
+enabled; set LOUISIANA911_PLAY_INTEGRITY_CREDENTIALS to its JSON key file.
 """
 import hashlib
 import time
@@ -64,7 +63,12 @@ def verdict_problem(payload: dict, package: str, challenge: str, now_ms: int | N
     app_verdict = (payload.get('appIntegrity') or {}).get('appRecognitionVerdict')
     if app_verdict != 'PLAY_RECOGNIZED':
         return 'unrecognized_app'
+    # A genuine, certified Android device (emulators and rooted phones fail).
     device = (payload.get('deviceIntegrity') or {}).get('deviceRecognitionVerdict') or []
-    if not device:
+    if not {'MEETS_DEVICE_INTEGRITY', 'MEETS_STRONG_INTEGRITY'} & set(device):
         return 'device_integrity'
+    # Installed or bought through Google Play by this account, not a copied APK.
+    licensing = (payload.get('accountDetails') or {}).get('appLicensingVerdict')
+    if licensing != 'LICENSED':
+        return 'unlicensed'
     return None
