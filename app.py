@@ -3945,6 +3945,11 @@ def about():
 def about_redirect():
     return redirect('/about/', code=301)
 
+@app.route('/contact')
+@app.route('/contact/')
+def contact_redirect():
+    return redirect('/about/#contact', code=301)
+
 
 @app.route('/privacy/')
 def privacy():
