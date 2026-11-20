@@ -173,50 +173,57 @@ class PlayIntegrityModeTests(unittest.TestCase):
                                   headers=dict(CLIENT, **{'X-Louisiana911-App-Token': token}))
         self.assertEqual(200, history.status_code)
 
-    def test_header_only_tokens_stop_working(self):
-        old = app._new_app_signed('a1', 'android')
-        response = self.client.get('/api/incidents/active',
-                                   headers=dict(CLIENT, **{'X-Louisiana911-App-Token': old}))
-        self.assertEqual(401, response.status_code)
+    def live_only(self, token):
+        """An a1 token reads live calls but not the archive."""
+        self.assertTrue(token.startswith('a1:'))
+        headers = dict(CLIENT, **{'X-Louisiana911-App-Token': token})
+        self.assertNotIn(self.client.get('/api/weather', headers=headers).status_code, (401, 403))
+        history = self.client.get('/api/incidents/history?date=2026-11-01', headers=headers)
+        self.assertIn(history.status_code, (401, 403))
 
-    def refused(self, challenge, verdict):
-        with patch.object(app_integrity, 'decode', return_value=verdict):
+    def test_header_only_tokens_are_live_only(self):
+        self.live_only(app._new_app_signed('a1', 'android'))
+
+    def downgraded(self, challenge, verdict=None, error=None):
+        with patch.object(app_integrity, 'decode', return_value=verdict, side_effect=error):
             response = self.client.post('/api/app/session', headers=CLIENT,
                                         json={'challenge': challenge, 'integrityToken': 'abc'})
-        self.assertEqual(401, response.status_code)
-        return response.get_json()['error']
+        self.assertEqual(200, response.status_code)
+        self.live_only(response.get_json()['token'])
+        return response.headers['X-Louisiana911-Access'].split('reason=')[1]
 
-    def test_weak_device_or_copied_app_is_refused(self):
+    def test_weak_device_or_copied_app_is_live_only(self):
         challenge = self.client.post('/api/app/session', headers=CLIENT).get_json()['challenge']
         basic_only = self.verdict(challenge, deviceIntegrity={'deviceRecognitionVerdict': ['MEETS_BASIC_INTEGRITY']})
-        self.assertEqual('device_integrity', self.refused(challenge, basic_only))
+        self.assertEqual('device_integrity', self.downgraded(challenge, basic_only))
         unlicensed = self.verdict(challenge, accountDetails={'appLicensingVerdict': 'UNLICENSED'})
-        self.assertEqual('unlicensed', self.refused(challenge, unlicensed))
+        self.assertEqual('unlicensed', self.downgraded(challenge, unlicensed))
 
-    def test_sideloaded_app_is_refused(self):
+    def test_sideloaded_app_is_live_only(self):
         challenge = self.client.post('/api/app/session', headers=CLIENT).get_json()['challenge']
         verdict = self.verdict(challenge, appIntegrity={'appRecognitionVerdict': 'UNRECOGNIZED_VERSION'})
-        with patch.object(app_integrity, 'decode', return_value=verdict):
-            response = self.client.post('/api/app/session', headers=CLIENT,
-                                        json={'challenge': challenge, 'integrityToken': 'abc'})
-        self.assertEqual(401, response.status_code)
-        self.assertEqual('unrecognized_app', response.get_json()['error'])
+        self.assertEqual('unrecognized_app', self.downgraded(challenge, verdict))
 
-    def test_verdict_for_another_challenge_is_refused(self):
+    def test_no_play_services_is_live_only(self):
+        challenge = self.client.post('/api/app/session', headers=CLIENT).get_json()['challenge']
+        response = self.client.post('/api/app/session', headers=CLIENT, json={'challenge': challenge})
+        self.assertEqual(200, response.status_code)
+        self.live_only(response.get_json()['token'])
+
+    def test_bad_or_missing_challenge_gets_a_new_one(self):
+        forged = 'c1:' + 'x' * 40
+        response = self.client.post('/api/app/session', headers=CLIENT, json={'challenge': forged, 'integrityToken': 'abc'})
+        self.assertEqual(401, response.status_code)
+        self.assertTrue(response.get_json()['challenge'].startswith('c1:'))
+
+    def test_verdict_for_another_challenge_is_live_only(self):
         challenge = self.client.post('/api/app/session', headers=CLIENT).get_json()['challenge']
         other = app._new_app_signed('c1', 'android')
-        with patch.object(app_integrity, 'decode', return_value=self.verdict(other)):
-            response = self.client.post('/api/app/session', headers=CLIENT,
-                                        json={'challenge': challenge, 'integrityToken': 'abc'})
-        self.assertEqual('wrong_request', response.get_json()['error'])
+        self.assertEqual('wrong_request', self.downgraded(challenge, self.verdict(other)))
 
-    def test_google_outage_is_503(self):
+    def test_google_outage_is_live_only(self):
         challenge = self.client.post('/api/app/session', headers=CLIENT).get_json()['challenge']
-        with patch.object(app_integrity, 'decode', side_effect=OSError('down')):
-            response = self.client.post('/api/app/session', headers=CLIENT,
-                                        json={'challenge': challenge, 'integrityToken': 'abc'})
-        self.assertEqual(503, response.status_code)
-
+        self.assertEqual('integrity_unavailable', self.downgraded(challenge, error=OSError('down')))
 
 if __name__ == '__main__':
     unittest.main()

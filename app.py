@@ -684,12 +684,15 @@ APP_TOKEN_HEADER = 'X-Louisiana911-App-Token'
 APP_PACKAGES = {'android': 'com.louisiana911.app'}
 APP_CLIENT_PATTERN = re.compile(r'^(android)/[0-9][0-9A-Za-z.+-]{0,30}$')
 # header: any request with a valid client header gets a live-only token (beta);
-# play-integrity: the app must also pass a Google Play Integrity verdict;
+# play-integrity: the app is asked for a Google Play Integrity verdict; a passing
+# one gets the full token, anything else (failed verdict, no Play services,
+# Google outage) still gets a live-only token after the challenge round trip;
 # off: the endpoint and app tokens are disabled.
-# Token kinds: a1 = header check only, a2 = passed Play Integrity. Only a2 may
+# Token kinds: a1 = live calls only, a2 = passed Play Integrity. Only a2 may
 # read past calls and reports, so faking the client header never opens the
-# archive. In play-integrity mode a1 tokens stop working altogether.
-APP_TOKEN_KINDS_BY_MODE = {'header': ('a1', 'a2'), 'play-integrity': ('a2',)}
+# archive. Live calls are public on the website, so an unverified install
+# (or a store reviewer's test device) still shows them instead of an empty app.
+APP_TOKEN_KINDS_BY_MODE = {'header': ('a1', 'a2'), 'play-integrity': ('a1', 'a2')}
 APP_LIVE_ONLY_PATHS = {'/api/incidents/active', '/api/status', '/api/weather'}
 APP_VERIFY_MODE = os.environ.get('LOUISIANA911_APP_VERIFY', 'header').strip().lower()
 APP_TOKEN_MAX_AGE_SECONDS = int(os.environ.get('LOUISIANA911_APP_TOKEN_MAX_AGE_SECONDS', '86400'))
@@ -908,10 +911,16 @@ def app_session():
         return jsonify({'error': 'not_found'}), 404
     if APP_VERIFY_MODE == 'play-integrity':
         body = request.get_json(silent=True)
-        problem = _app_integrity_problem(client, body if isinstance(body, dict) else {})
+        body = body if isinstance(body, dict) else {}
+        challenge = body.get('challenge')
+        if not isinstance(challenge, str) or _valid_app_signed(challenge, 'c1', APP_CHALLENGE_MAX_AGE_SECONDS) != client:
+            return jsonify({'error': 'integrity_required', 'challenge': _new_app_signed('c1', client)}), 401
+        problem = _app_integrity_problem(client, body)
         if problem is not None:
-            status = 503 if problem == 'integrity_unavailable' else 401
-            return jsonify({'error': problem, 'challenge': _new_app_signed('c1', client)}), status
+            print(f'App session without Play Integrity ({problem}): live-only token', file=sys.stderr)
+            response = _app_session_response(client, 'a1')
+            response.headers['X-Louisiana911-Access'] = f'live; reason={problem}'
+            return response
         return _app_session_response(client, 'a2')
     return _app_session_response(client, 'a1')
 
