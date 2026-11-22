@@ -1305,6 +1305,13 @@
       padding: 2px;
     }
 
+    /* Agency name beside its patch, so the button says what it filters. */
+    .filter-name {
+      margin-left: 6px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
     .filter-btn.active .filter-logo {
       border-color: rgba(255, 59, 59, 0.55);
       box-shadow: none;
@@ -4133,5 +4140,170 @@
       .nearby-item {
         flex-wrap: wrap;
         gap: 4px 10px;
+      }
+    }
+
+    /* Readable desktop and tablet (#30). The phone layout already follows the
+       Fastball rules (nothing under 14px, plain words, no ALL CAPS); wider
+       screens had 8-10px labels. Same sizes and wording here, scaled to the
+       mouse-sized desktop layout. Phones (720px and under) are unchanged. */
+    @media (min-width: 721px) {
+      .logo-text h1 { font-size: 22px; }
+      .logo-text p {
+        font-size: 14px;
+        letter-spacing: 0;
+        text-transform: none;
+      }
+
+      .status-label {
+        font-size: 13px;
+        letter-spacing: 0;
+        text-transform: none;
+      }
+      .status-value { font-size: 15px; }
+      .status-value.live {
+        font-size: 14px;
+        letter-spacing: 0;
+        text-transform: none;
+      }
+      .view-switch-btn {
+        height: 34px;
+        padding: 0 12px;
+        font-size: 14px;
+      }
+      .location-btn,
+      .near-btn,
+      .reports-link {
+        height: 38px;
+        font-size: 15px;
+      }
+      .info-btn {
+        width: 38px;
+        height: 38px;
+        font-size: 17px;
+      }
+
+      .basemap-option {
+        font-size: 14px;
+        letter-spacing: 0;
+        text-transform: none;
+      }
+      .legend-content h3 { font-size: 14px; }
+      .legend-item,
+      .legend-note { font-size: 14px; }
+      .legend-collapse {
+        height: 26px;
+        font-size: 14px;
+      }
+
+      .tab {
+        min-height: 44px;
+        font-size: 15px;
+        letter-spacing: 0;
+        text-transform: none;
+      }
+      .source-tab {
+        min-height: 38px;
+        font-size: 15px;
+        letter-spacing: 0;
+      }
+      .daily-pill {
+        font-size: 12px;
+        padding: 2px 6px;
+      }
+      /* Area tabs size to their words and wrap, so "Calcasieu 24h delay"
+         fits instead of being squeezed into a third of the row. */
+      .source-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        overflow-x: visible;
+      }
+      .source-tabs .source-tab {
+        flex: 1 1 auto;
+        padding-inline: 12px;
+        gap: 6px;
+      }
+      .source-group-header {
+        font-size: 14px;
+        letter-spacing: 0;
+        text-transform: none;
+      }
+
+      .filter-btn,
+      .sort-btn,
+      .history-count {
+        font-size: 14px;
+        letter-spacing: 0;
+      }
+      .filter-btn { padding: 5px 8px; }
+      .urgency-label { font-size: 14px; }
+
+      .incident-type { font-size: 17px; }
+      .incident-time { font-size: 14px; }
+      .incident-location { font-size: 15px; }
+      .location-accuracy-note { font-size: 13px; }
+      .incident-agency { font-size: 13px; }
+      .incident-units { font-size: 14px; }
+      .incident-share-btn {
+        min-height: 34px;
+        font-size: 14px;
+      }
+      .incident-share-notice { font-size: 15px; }
+
+      .leaflet-container .leaflet-control-attribution { font-size: 12px; }
+
+      /* Desktop list view (one row per call) */
+      body.list-view .incident-type { font-size: 16px; }
+      body.list-view .incident-card {
+        grid-template-columns: minmax(0, 1fr) 76px minmax(0, 1.2fr) minmax(0, 1.1fr);
+        min-height: 60px;
+      }
+      body.list-view .dated-call {
+        grid-template-columns: minmax(0, 1fr) 140px minmax(0, 1.2fr) minmax(0, 1.1fr);
+      }
+      .urgency-btn[data-urgency="all"] { font-size: 14px; }
+    }
+
+    /* iPads and other touch screens wide enough for the desktop layout get
+       finger-sized targets. */
+    @media (min-width: 721px) and (pointer: coarse) {
+      .view-switch-btn,
+      .location-btn,
+      .near-btn,
+      .reports-link,
+      .source-tab,
+      .filter-btn,
+      .sort-btn,
+      .incident-share-btn,
+      .basemap-option { min-height: 44px; }
+      .view-switch-btn,
+      .location-btn,
+      .near-btn,
+      .reports-link { height: 44px; }
+      .info-btn { width: 44px; height: 44px; }
+    }
+
+    /* Room for the larger card text beside the map (below 901px the list
+       sits under the map). */
+    @media (min-width: 1101px) {
+      .main-container { grid-template-columns: minmax(0, 1fr) 440px; }
+    }
+
+    /* Phones: every area tab visible (no sideways scrolling) and a Near me
+       button with readable contrast (white on #2a6fd6 is 4.8:1). */
+    @media (max-width: 720px) {
+      .source-tabs {
+        flex-wrap: wrap;
+        overflow-x: visible;
+        -webkit-mask-image: none;
+        mask-image: none;
+      }
+      .near-btn {
+        background: #2a6fd6;
+        border-color: #2a6fd6;
+      }
+      .daily-pill {
+        font-size: 12px;
+        padding: 2px 5px;
       }
     }
