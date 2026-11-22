@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en-US">
 <head>
-  <script defer src="/analytics.js?v=4.8.3"></script>
+  <script defer src="/analytics.js?v=4.8.4"></script>
   <meta charset="UTF-8">
   <script type="application/json" id="map-config">{}</script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -77,16 +77,16 @@
     ]
   }
   </script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://unpkg.com">
   <!-- The basemap style, tiles and fonts come from here; open the connection
        while the page loads instead of after the app script runs. MapLibre
        fetches with CORS, so the preconnect must be crossorigin to be reused. -->
   <link rel="preconnect" href="https://tiles.versatiles.org" crossorigin>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Map code, styles and the font are served from this site, so a slow or
+       blocked third-party CDN can't hold up or break the page. MapLibre's
+       stylesheet and script load later, the first time the map is shown. -->
+  <link rel="preload" href="/fonts/space-grotesk-5.3.0/latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/fonts/space-grotesk-5.3.0/space-grotesk.css">
+  <link rel="stylesheet" href="/vendor/leaflet@1.9.4/leaflet.css" />
   <link rel="stylesheet" href="styles.css?v=4.11.0" />
 </head>
 <body class="map-dark">
@@ -512,9 +512,7 @@
     </aside>
   </main>
   
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-  <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.3/leaflet-maplibre-gl.js"></script>
+  <script src="/vendor/leaflet@1.9.4/leaflet.js"></script>
   <script>
     const preferences = {
       get(key) { try { return localStorage.getItem(key); } catch { return null; } },
@@ -731,9 +729,50 @@
       if (dark && renderer.getLayer('water')) renderer.setPaintProperty('water', 'fill-color', '#202830');
     }
 
+    // MapLibre and its Leaflet adapter (about 340 KB) only draw the basemap.
+    // They load the first time the map is shown, so phones that open on the
+    // list never wait for them. Until they arrive the map shows no basemap
+    // rather than flashing the raster fallback.
+    const VECTOR_LIBRARY_CSS = '/vendor/maplibre-gl@5.24.0/maplibre-gl.css';
+    const VECTOR_LIBRARY_SCRIPTS = [
+      '/vendor/maplibre-gl@5.24.0/maplibre-gl.js',
+      '/vendor/maplibre-gl-leaflet@0.1.3/leaflet-maplibre-gl.js',
+    ];
+    let vectorLibraryState = 'idle'; // idle | loading | ready | failed
+
+    function loadVectorLibraries() {
+      if (vectorLibraryState !== 'idle') return;
+      vectorLibraryState = 'loading';
+      const stylesheet = document.createElement('link');
+      stylesheet.rel = 'stylesheet';
+      stylesheet.href = VECTOR_LIBRARY_CSS;
+      document.head.appendChild(stylesheet);
+      const loadScript = (src) => new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`Could not load ${src}`));
+        document.head.appendChild(script);
+      });
+      VECTOR_LIBRARY_SCRIPTS.reduce((chain, src) => chain.then(() => loadScript(src)), Promise.resolve())
+        .then(() => { vectorLibraryState = 'ready'; })
+        .catch((error) => {
+          vectorLibraryState = 'failed';
+          console.warn(`${error.message}; using raster map tiles`);
+        })
+        .finally(() => setBasemapMode(basemapMode, { persist: false }));
+    }
+
+    // Returns true when the vector basemap is showing (or on its way), false to
+    // use raster tiles, or 'pending' while the map libraries are loading.
     function showVectorBasemap(mode) {
       const provider = oldMapStyle ? 'carto' : 'colorful';
-      if ((provider === 'carto' && !cartoKey) || vectorFailed || typeof L.maplibreGL !== 'function') return false;
+      if ((provider === 'carto' && !cartoKey) || vectorFailed) return false;
+      if (typeof L.maplibreGL !== 'function') {
+        if (vectorLibraryState === 'failed' || vectorLibraryState === 'ready') return false;
+        loadVectorLibraries();
+        return 'pending';
+      }
       try {
         if (vectorLayer && vectorProvider !== provider) {
           // Attribution and request rules belong to the provider, so start fresh.
@@ -785,13 +824,15 @@
     function setBasemapMode(mode, { persist = true } = {}) {
       const nextMode = mode === 'light' ? 'light' : 'dark';
       basemapMode = nextMode;
-      const useVector = showVectorBasemap(nextMode);
-      const nextLayer = useVector ? vectorLayer : (cartoLayers ? cartoLayers[nextMode] : streetTileLayer);
+      const vectorState = showVectorBasemap(nextMode);
+      const pending = vectorState === 'pending';
+      const useVector = vectorState === true;
+      const nextLayer = pending ? null : useVector ? vectorLayer : (cartoLayers ? cartoLayers[nextMode] : streetTileLayer);
       [streetTileLayer, ...Object.values(cartoLayers || {})].forEach(layer => {
         if (layer !== nextLayer && map.hasLayer(layer)) map.removeLayer(layer);
       });
-      if (!map.hasLayer(nextLayer)) nextLayer.addTo(map);
-      map.getContainer().dataset.basemapProvider = useVector ? `${vectorProvider}-vector` : (cartoLayers ? 'carto' : 'osm');
+      if (nextLayer && !map.hasLayer(nextLayer)) nextLayer.addTo(map);
+      map.getContainer().dataset.basemapProvider = pending ? 'loading' : useVector ? `${vectorProvider}-vector` : (cartoLayers ? 'carto' : 'osm');
 
       basemapMode = nextMode;
       map.getContainer().dataset.basemapMode = nextMode;
@@ -4122,7 +4163,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.11.0', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.11.1', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);
