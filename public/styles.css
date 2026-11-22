@@ -4289,3 +4289,21 @@
       .main-container { grid-template-columns: minmax(0, 1fr) 440px; }
     }
 
+    /* Phones: every area tab visible (no sideways scrolling) and a Near me
+       button with readable contrast (white on #2a6fd6 is 4.8:1). */
+    @media (max-width: 720px) {
+      .source-tabs {
+        flex-wrap: wrap;
+        overflow-x: visible;
+        -webkit-mask-image: none;
+        mask-image: none;
+      }
+      .near-btn {
+        background: #2a6fd6;
+        border-color: #2a6fd6;
+      }
+      .daily-pill {
+        font-size: 12px;
+        padding: 2px 5px;
+      }
+    }
