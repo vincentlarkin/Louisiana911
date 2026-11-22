@@ -537,6 +537,50 @@ test('vector styles share a renderer and unavailable WebGL falls back', () => {
   assert.equal(ctx.vectorFailed, true);
 });
 
+function vectorLibraryContext() {
+  const appended = [];
+  const redraws = [];
+  const ctx = loadFunctions(['loadVectorLibraries', 'showVectorBasemap'], {
+    cartoKey: '', vectorFailed: false, oldMapStyle: false, vectorLibraryState: 'idle',
+    VECTOR_LIBRARY_CSS: '/vendor/maplibre.css',
+    VECTOR_LIBRARY_SCRIPTS: ['/vendor/maplibre.js', '/vendor/adapter.js'],
+    L: {}, basemapMode: 'dark', Promise,
+    setBasemapMode: (mode, options) => redraws.push([mode, options]),
+    document: { createElement: tag => ({ tag }), head: { appendChild: el => appended.push(el) } },
+  });
+  return { ctx, appended, redraws };
+}
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('the map libraries load only when the basemap is first drawn, then redraw it', async () => {
+  const { ctx, appended, redraws } = vectorLibraryContext();
+  assert.equal(appended.length, 0);
+  assert.equal(ctx.showVectorBasemap('dark'), 'pending');
+  assert.equal(ctx.showVectorBasemap('dark'), 'pending');
+  await settle();
+  assert.deepEqual(appended.map(el => el.href || el.src), ['/vendor/maplibre.css', '/vendor/maplibre.js']);
+  appended[1].onload();
+  await settle();
+  assert.equal(appended[2].src, '/vendor/adapter.js');
+  ctx.L.maplibreGL = () => { throw new Error('stop here'); };
+  appended[2].onload();
+  await settle();
+  assert.equal(ctx.vectorLibraryState, 'ready');
+  assert.equal(JSON.stringify(redraws), JSON.stringify([['dark', { persist: false }]]));
+});
+
+test('if the map libraries fail to load the map falls back to raster tiles', async () => {
+  const { ctx, appended, redraws } = vectorLibraryContext();
+  assert.equal(ctx.showVectorBasemap('dark'), 'pending');
+  await settle();
+  appended[1].onerror();
+  await settle();
+  assert.equal(ctx.vectorLibraryState, 'failed');
+  assert.equal(redraws.length, 1);
+  assert.equal(ctx.showVectorBasemap('dark'), false);
+  assert.equal(appended.length, 2);
+});
+
 test('colorful maps are the default and old map style switches providers', () => {
   const created = [];
   const removed = [];
