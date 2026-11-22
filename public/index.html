@@ -405,23 +405,23 @@
           <div class="filter-group agency-group agency-group-caddo hidden" data-filter-type="agency-caddo">
             <button class="filter-btn active" type="button" data-filter="all" title="All Caddo units">All</button>
             <button class="filter-btn" type="button" data-filter="cadfd" title="Caddo Fire/EMS">
-              <img src="images/cfd-fire.png" alt="CAD-FD/EMS" class="filter-logo" loading="lazy" decoding="async">
+              <img src="images/cfd-fire.png" alt="" class="filter-logo" loading="lazy" decoding="async"><span class="filter-name">Caddo Fire</span>
             </button>
             <button class="filter-btn" type="button" data-filter="shvfd" title="Shreveport Fire">
-              <img src="images/sfd-fire.png" alt="SHVFD" class="filter-logo" loading="lazy" decoding="async">
+              <img src="images/sfd-fire.png" alt="" class="filter-logo" loading="lazy" decoding="async"><span class="filter-name">Shreveport Fire</span>
             </button>
             <button class="filter-btn" type="button" data-filter="police" title="Shreveport Police">
-              <img src="images/spd-police.png" alt="Shreveport Police" class="filter-logo" loading="lazy" decoding="async">
+              <img src="images/spd-police.png" alt="" class="filter-logo" loading="lazy" decoding="async"><span class="filter-name">Shreveport Police</span>
             </button>
             <button class="filter-btn" type="button" data-filter="sheriff" title="Caddo Sheriff">
-              <img src="images/cso-sheriff.png" alt="Caddo Sheriff" class="filter-logo" loading="lazy" decoding="async">
+              <img src="images/cso-sheriff.png" alt="" class="filter-logo" loading="lazy" decoding="async"><span class="filter-name">Caddo Sheriff</span>
             </button>
           </div>
 
           <!-- Baton Rouge agency filters -->
           <div class="filter-group agency-group agency-group-batonrouge hidden" data-filter-type="agency-batonrouge">
             <button class="filter-btn active" type="button" data-br-agency="all" title="All Baton Rouge agencies">All</button>
-            <button class="filter-btn" type="button" data-br-agency="law" title="Law enforcement incidents">LAW</button>
+            <button class="filter-btn" type="button" data-br-agency="law" title="Law enforcement incidents">Law</button>
             <button class="filter-btn" type="button" data-br-agency="oss" title="OSS incidents">OSS</button>
           </div>
 
@@ -429,13 +429,13 @@
           <div class="filter-group agency-group agency-group-lafayette hidden" data-filter-type="agency-lafayette">
             <button class="filter-btn active" type="button" data-laf-unit="all" title="All Lafayette units">All</button>
             <button class="filter-btn" type="button" data-laf-unit="police" title="Lafayette Police">
-              <img src="images/lafayette-police.png" alt="Lafayette Police" class="filter-logo" loading="lazy" decoding="async">
+              <img src="images/lafayette-police.png" alt="" class="filter-logo" loading="lazy" decoding="async"><span class="filter-name">Police</span>
             </button>
             <button class="filter-btn" type="button" data-laf-unit="sheriff" title="Lafayette Sheriff">
-              <img src="images/lafayette-sheriff.png" alt="Lafayette Sheriff" class="filter-logo" loading="lazy" decoding="async">
+              <img src="images/lafayette-sheriff.png" alt="" class="filter-logo" loading="lazy" decoding="async"><span class="filter-name">Sheriff</span>
             </button>
             <button class="filter-btn" type="button" data-laf-unit="fire" title="Lafayette Fire">
-              <img src="images/lafayette-fire.png" alt="Lafayette Fire" class="filter-logo" loading="lazy" decoding="async">
+              <img src="images/lafayette-fire.png" alt="" class="filter-logo" loading="lazy" decoding="async"><span class="filter-name">Fire</span>
             </button>
           </div>
           <!-- Urgency/Severity filters -->
@@ -3047,12 +3047,11 @@
           el.textContent = (currentSource === 'neworleans' || DELAYED_CLOSED_SOURCES.has(currentSource))
             ? selectedFeedRefresh
             : `${selectedFeedRefresh} ${tz}`;
+        } else if (Number.isFinite(scrapedAt.getTime())) {
+          // Same 12-hour Central time as the call cards and the phone status line.
+          el.textContent = scrapedAt.toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' });
         } else if (status.lastUpdateDisplay) {
           el.textContent = status.lastUpdateDisplay;
-        } else if (status.lastScrapeFinishedAt || status.lastUpdate) {
-          // Fallback: if the backend didn't provide Central-time strings, show local time.
-          const date = new Date(status.lastScrapeFinishedAt || status.lastUpdate);
-          el.textContent = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         }
 
         // Helpful hover text
