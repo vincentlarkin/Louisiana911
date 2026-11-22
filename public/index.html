@@ -329,7 +329,7 @@
       </section>
       <div class="legend-container" id="legend-container">
         <div class="map-overlay" id="map-legend">
-          <button class="legend-collapse" id="legend-collapse" type="button" aria-expanded="true" aria-label="Collapse legend" title="Collapse legend">◀</button>
+          <button class="legend-collapse" id="legend-collapse" type="button" aria-expanded="true" aria-label="Collapse legend" title="Collapse legend"><span class="legend-collapse-icon" aria-hidden="true">◀</span></button>
           
           <!-- Collapsed "handle" view (drawer-closed) -->
           <div class="legend-mini" aria-hidden="true">
@@ -919,23 +919,36 @@
       document.documentElement.style.setProperty('--header-height', `${header.offsetHeight}px`);
     }
     
-    function setLegendCollapsed(collapsed) {
+    const legendMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    // Open or close the legend. The drawer's width and height animate together
+    // from wherever they are now (so a second click mid-animation reverses
+    // smoothly) to the new size; the text keeps its width and is clipped.
+    function setLegendCollapsed(collapsed, { animate = true } = {}) {
       if (!legendContainer) return;
+      const canAnimate = animate && legendPanel && typeof legendPanel.animate === 'function' &&
+        !legendMotionQuery.matches && legendPanel.offsetParent !== null;
+      const from = canAnimate ? legendPanel.getBoundingClientRect() : null;
+      legendPanel?.getAnimations?.().forEach(animation => animation.cancel());
       legendContainer.classList.toggle('collapsed', collapsed);
-      if (legendPanel) legendPanel.style.height = '';
-      
+
       if (legendCollapse) {
         legendCollapse.setAttribute('aria-expanded', String(!collapsed));
-        legendCollapse.textContent = collapsed ? '▶' : '◀';
         legendCollapse.title = collapsed ? 'Expand legend' : 'Collapse legend';
         legendCollapse.setAttribute('aria-label', collapsed ? 'Expand legend' : 'Collapse legend');
       }
+
+      if (!from) return;
+      const to = legendPanel.getBoundingClientRect();
+      legendPanel.animate([
+        { width: `${from.width}px`, height: `${from.height}px` },
+        { width: `${to.width}px`, height: `${to.height}px` },
+      ], { duration: 260, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
     }
-    
-    // Initial setup, then optionally collapse for smaller screens
-    if (legendPanel) legendPanel.style.height = '';
+
+    // Start closed on smaller screens, without animating.
     updateHeaderHeight();
-    if (window.innerWidth < 960) setLegendCollapsed(true);
+    if (window.innerWidth < 960) setLegendCollapsed(true, { animate: false });
     
     legendCollapse?.addEventListener('click', () => {
       const isCollapsed = legendContainer?.classList.contains('collapsed');
