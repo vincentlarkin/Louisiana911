@@ -426,22 +426,40 @@
         0 0 10px rgba(0,0,0,0.25);
     }
     
+    /* The legend drawer. The button stays pinned to the top-right corner and
+       the collapsed drawer is exactly one button wide (plus 6px each side),
+       so the button never has to move; only its arrow turns. */
+    .legend-container {
+      --legend-btn: 24px;
+      --legend-gap: 6px;
+    }
+
     .legend-collapse {
       position: absolute;
-      top: 6px;
-      right: 6px;
-      width: 19px;
-      height: 19px;
+      top: var(--legend-gap);
+      right: var(--legend-gap);
+      z-index: 1;
+      width: var(--legend-btn);
+      height: var(--legend-btn);
       border-radius: 6px;
       border: 1px solid rgba(255, 255, 255, 0.10);
       background: var(--bg-card);
       color: var(--text-dim);
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
       display: grid;
       place-items: center;
-      font-size: 11px;
+      font-size: 12px;
       line-height: 1;
+    }
+
+    .legend-collapse-icon {
+      display: block;
+      transition: transform 0.24s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .legend-container.collapsed .legend-collapse-icon {
+      transform: rotate(180deg);
     }
     
     .legend-collapse:hover {
@@ -458,47 +476,38 @@
       border: 1px solid var(--border);
       box-shadow: 0 10px 30px rgba(0,0,0,0.34);
       width: 210px;
-      transition:
-        width 0.24s cubic-bezier(0.2, 0, 0, 1),
-        padding 0.24s cubic-bezier(0.2, 0, 0, 1),
-        border-radius 0.2s ease;
+      /* Width and height are animated from script (setLegendCollapsed), so
+         both change together instead of the text reflowing as it narrows. */
       position: relative;
       overflow: hidden;
-      will-change: width, padding;
     }
     
+    /* Fixed width (the open drawer's content box) so the text never rewraps
+       while the drawer opens or closes; the drawer just clips it. */
     .legend-content {
-      padding-right: 0;
-      max-height: 420px;
-      overflow: hidden;
+      width: 174px;
       opacity: 1;
-      transform: translateX(0);
       visibility: visible;
       transition:
-        max-height 0.18s ease 0.02s,
-        opacity 0.12s ease 0.08s,
-        transform 0.2s ease 0.05s,
+        opacity 0.16s ease 0.08s,
         visibility 0s linear 0s;
     }
     
+    /* The dot column shown when closed. It sits in the same spot in both
+       states (under the button), so it only fades. */
     .legend-mini {
       position: absolute;
-      top: 31px;
-      left: 50%;
+      top: calc(var(--legend-gap) * 2 + var(--legend-btn) + 2px);
+      left: var(--legend-gap);
       display: flex;
-      height: auto;
-      width: auto;
-      padding: 0;
+      width: var(--legend-btn);
       justify-content: center;
-      align-items: flex-start;
       opacity: 0;
       visibility: hidden;
       pointer-events: none;
-      transform: translate(-50%, 6px) scale(0.95);
       transition:
-        opacity 0.14s ease,
-        transform 0.2s ease,
-        visibility 0s linear 0.2s;
+        opacity 0.1s ease,
+        visibility 0s linear 0.1s;
     }
 
     .legend-mini .dot-stack {
@@ -512,41 +521,37 @@
     }
     
     .legend-container.collapsed .map-overlay {
-      width: 34px;
-      padding: 31px 6px 10px;
-      border-radius: 12px;
-      height: auto;
-      min-height: 0;
+      width: calc(var(--legend-btn) + var(--legend-gap) * 2);
+      padding: calc(var(--legend-gap) * 2 + var(--legend-btn) + 2px) var(--legend-gap) 10px;
     }
 
-    .legend-container.collapsed .legend-collapse {
-      right: 50%;
-      transform: translateX(50%);
-    }
-    
+    /* Closed: the text leaves the layout (so the drawer can shrink around the
+       dots) but keeps its place and width while it fades under the clip. */
     .legend-container.collapsed .legend-content {
-      max-height: 0;
-      padding-right: 0;
+      position: absolute;
+      top: 16px;
+      left: 18px;
       opacity: 0;
-      transform: translateX(-10px);
       visibility: hidden;
       pointer-events: none;
       transition:
-        max-height 0.1s ease,
-        opacity 0.08s ease,
-        transform 0.12s ease,
-        visibility 0s linear 0.12s;
+        opacity 0.16s ease,
+        visibility 0s linear 0.16s;
     }
-    
+
     .legend-container.collapsed .legend-mini {
       position: static;
       opacity: 1;
       visibility: visible;
-      transform: none;
       transition:
-        opacity 0.14s ease 0.06s,
-        transform 0.2s ease 0.04s,
+        opacity 0.16s ease 0.1s,
         visibility 0s linear 0s;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .legend-collapse-icon,
+      .legend-content,
+      .legend-mini { transition: none; }
     }
     
     .map-overlay h3 {
@@ -4145,13 +4150,15 @@
         letter-spacing: 0;
         text-transform: none;
       }
-      .legend-content h3 { font-size: 14px; }
+      .legend-content h3 {
+        font-size: 14px;
+        letter-spacing: 0;
+        text-transform: none;
+      }
       .legend-item,
       .legend-note { font-size: 14px; }
-      .legend-collapse {
-        height: 26px;
-        font-size: 14px;
-      }
+      .legend-container { --legend-btn: 28px; }
+      .legend-collapse { font-size: 14px; }
 
       .tab {
         min-height: 44px;
