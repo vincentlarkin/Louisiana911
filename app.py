@@ -2799,10 +2799,6 @@ DELAYED_CLOSED_CALL_SOURCES = {
 }
 
 
-# Backwards compatibility for any old call sites.
-def scrape_incidents():
-    return scrape_caddo_incidents()
-
 # Track last update time
 last_update: str | None = None
 scrape_interval_seconds: int = SCRAPE_INTERVAL_SECONDS_DEFAULT

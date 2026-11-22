@@ -1201,23 +1201,6 @@
       return `${keyPrefix}|${base}`;
     }
     
-    // Agency color mapping
-    function getAgencyColor(agency) {
-      if (agency.startsWith('CFD') || agency.startsWith('SFD') || agency.includes('FIRE')) return '#ff6b35'; // Fire
-      if (agency === 'EMS' || agency.includes('EMS')) return '#ff3b6b'; // Medical
-      if (agency === 'SPD' || agency.includes('POLICE')) return '#3b8bff'; // Police
-      if (agency === 'CSO' || agency.includes('SHERIFF')) return '#9b59b6'; // Sheriff
-      return '#ffb830'; // Other
-    }
-    
-    function getAgencyClass(agency) {
-      if (agency.startsWith('CFD') || agency.startsWith('SFD') || agency.includes('FIRE')) return 'fire';
-      if (agency === 'EMS' || agency.includes('EMS')) return 'medical';
-      if (agency === 'SPD' || agency.includes('POLICE')) return 'police';
-      if (agency === 'CSO' || agency.includes('SHERIFF')) return 'sheriff';
-      return 'other';
-    }
-    
     // Severity classification (meaningful colors)
     // - high: life safety / violence / fire / serious traffic
     // - medium: theft / hazards / accidents
@@ -1988,10 +1971,6 @@
       const street = String(incident?.street || '');
       return quality.startsWith('approximate-') ||
         /^\s*approx(?:imate)?\s+loc(?:ation)?\s*:/i.test(street);
-    }
-
-    function approximateLocationExplanation() {
-      return 'Approximate Location';
     }
 
     const MAP_COORDINATE_BOUNDS = {
