@@ -1973,12 +1973,6 @@
       margin-top: 18px;
     }
 
-    .incident-modal-share-actions {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-    }
-
     .incident-modal-btn {
       display: inline-flex;
       align-items: center;
@@ -2701,42 +2695,6 @@
       color: rgba(241, 242, 245, 0.72) !important;
     }
     
-    .custom-marker {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    
-    .marker-pulse {
-      width: 20px;
-      height: 20px;
-      border-radius: 50%;
-      position: relative;
-    }
-
-    /* Static (non-pulsing) marker used for History mode */
-    .marker-static {
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      position: relative;
-      box-shadow: 0 0 0 2px rgba(0,0,0,0.35);
-    }
-    
-    .marker-pulse::after {
-      content: '';
-      position: absolute;
-      inset: -5px;
-      border-radius: 50%;
-      border: 2px solid currentColor;
-      animation: marker-pulse 1.1s ease-out infinite;
-    }
-    
-    @keyframes marker-pulse {
-      0% { transform: scale(1); opacity: 1; }
-      100% { transform: scale(2); opacity: 0; }
-    }
-
     .leaflet-unit-pulse-pane {
       pointer-events: none;
     }
@@ -2955,7 +2913,6 @@
         gap: 8px 16px;
         padding: 14px 16px;
       }
-      body.list-view .incident-card.delayed-call { grid-template-columns: minmax(0, 1fr) auto; }
       body.list-view .incident-time { justify-self: end; }
       body.list-view .incident-location,
       body.list-view .incident-meta { grid-column: 1 / -1; }
