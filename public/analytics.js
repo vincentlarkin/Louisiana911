@@ -109,11 +109,22 @@
   function loadGoogleTag() {
     // Local previews retain the event queue for testing without polluting GA4.
     if (!['louisiana911.com', 'www.louisiana911.com'].includes(location.hostname)) return;
-    const script = document.createElement('script');
-    script.async = true;
-    script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(MEASUREMENT_ID)}`;
-    script.dataset.analyticsLoader = 'ga4';
-    document.head.appendChild(script);
+    // Google's tag is about 195 KB and the page's biggest script cost, so it
+    // waits until the page has loaded and the browser is idle. Events queue in
+    // dataLayer until then and are sent when it arrives.
+    const inject = () => {
+      const script = document.createElement('script');
+      script.async = true;
+      script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(MEASUREMENT_ID)}`;
+      script.dataset.analyticsLoader = 'ga4';
+      document.head.appendChild(script);
+    };
+    const whenIdle = () => {
+      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(inject, { timeout: 4000 });
+      else setTimeout(inject, 1500);
+    };
+    if (document.readyState === 'complete') whenIdle();
+    else window.addEventListener('load', whenIdle, { once: true });
   }
 
   function track(name, parameters = {}) {
