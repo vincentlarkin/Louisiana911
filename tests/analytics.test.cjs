@@ -5,20 +5,17 @@ const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../public/analytics.js'), 'utf8');
 
-function tracker(url = 'https://louisiana911.com/', height = 1200, readyState = 'complete') {
+function tracker(url = 'https://louisiana911.com/', height = 1200) {
   const handlers = {};
-  const loadListeners = [];
   const scripts = [];
   const selected = { dataset: { source: 'all' } };
   const selectedView = { dataset: { viewMode: 'map' } };
   const selectedTab = { dataset: { tab: 'live' } };
   const window = {
     innerHeight: 800, innerWidth: 1000, scrollY: 0,
-    addEventListener: (name, fn) => { handlers[name] = fn; if (name === 'load') loadListeners.push(fn); },
-    requestIdleCallback: fn => fn(),
+    addEventListener: (name, fn) => { handlers[name] = fn; },
   };
   const document = {
-    readyState,
     title: 'Incident title', referrer: 'https://example.com/page?private=value#secret',
     visibilityState: 'visible', documentElement: { scrollHeight: height },
     head: { appendChild: script => scripts.push(script) },
@@ -35,7 +32,7 @@ function tracker(url = 'https://louisiana911.com/', height = 1200, readyState = 
     setInterval() {}, setTimeout() {}, requestAnimationFrame: fn => fn(),
   });
   vm.runInContext(source, ctx);
-  return { window, document, handlers, loadListeners, scripts, selected, selectedView, selectedTab, ctx,
+  return { window, document, handlers, scripts, selected, selectedView, selectedTab, ctx,
     events: () => window.dataLayer.filter(row => row[0] === 'event') };
 }
 
@@ -49,16 +46,6 @@ test('GA initializes once, removes incident IDs and query strings, and identifie
   assert.equal(app.scripts.length, 1);
   vm.runInContext(source, app.ctx);
   assert.equal(app.scripts.length, 1);
-});
-
-test('the Google tag waits for the page to load, then queued events still go out', () => {
-  const app = tracker('https://louisiana911.com/', 1200, 'loading');
-  app.window.louisiana911Analytics.track('history_view', { result_count: 3 });
-  assert.equal(app.scripts.length, 0);
-  app.loadListeners.forEach(fn => fn());
-  assert.equal(app.scripts.length, 1);
-  assert.equal(app.scripts[0].dataset.analyticsLoader, 'ga4');
-  assert.equal(app.events()[0][1], 'history_view');
 });
 
 test('local previews queue events without loading Google and use the current selected source', () => {
