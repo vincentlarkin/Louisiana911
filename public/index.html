@@ -887,14 +887,19 @@
 
     let parishOutlineLayer = null;
 
+    // A solid gold border with a light tint inside, so the covered parish stands out from its neighbors.
     function getParishOutlineStyle() {
+      const light = basemapMode === 'light';
       return {
         pane: 'parish',
-        color: basemapMode === 'light' ? '#596579' : '#c2ccd8',
-        weight: 1,
-        opacity: 0.55,
-        dashArray: '5 6',
-        fill: false
+        interactive: false,
+        color: light ? '#b07a1c' : '#d9a646',
+        weight: 1.6,
+        opacity: light ? 0.9 : 0.95,
+        lineJoin: 'round',
+        fill: true,
+        fillColor: light ? '#3d6fd1' : '#a9c4ff',
+        fillOpacity: light ? 0.08 : 0.09
       };
     }
 
@@ -904,10 +909,12 @@
       return response.json();
     }
 
-    // Caddo, East Baton Rouge and Lafayette from US Census county boundaries;
+    // Caddo, East Baton Rouge and Lafayette from Census TIGER/Line county
+    // boundaries (TIGERweb, simplified to about 13 m so they follow the rivers);
     // Orleans from the City of New Orleans' own boundary, which follows the
-    // river geometry the NOPD feed uses. A 41 KB local file replaces a 3 MB
-    // national county download and a slow data.nola.gov request.
+    // river geometry the NOPD feed uses. A ~105 KB local file (about 30 KB
+    // gzipped) replaces a 3 MB national county download and a slow
+    // data.nola.gov request.
     let parishOutlineRequest = null;
     async function loadParishOutline() {
       if (parishOutlineLayer || parishOutlineRequest) return parishOutlineRequest;
@@ -925,7 +932,7 @@
         return;
       }
 
-      parishOutlineLayer = L.geoJSON(outlines, { style: getParishOutlineStyle() });
+      parishOutlineLayer = L.geoJSON(outlines, { style: getParishOutlineStyle(), interactive: false });
       parishOutlineLayer.addTo(map);
     }
     
@@ -1988,7 +1995,7 @@
     }
 
     function markerLabel(incident) {
-      return `${incident.description || 'Incident'} — ${incidentLocationText(incident)}`;
+      return `${plainCase(incident.description || 'Incident')} — ${plainLocationText(incident)}`;
     }
 
     function markerIcon(incident) {
@@ -2280,21 +2287,20 @@
 
     function buildIncidentPopupHtml(incident, { mode = 'live' } = {}) {
       const sev = getSeverity(incident);
-      const agencyDisplay = formatAgencyDisplay(incident);
-      const locationStr = incidentLocationText(incident);
+      // Same wording as the incident list and dialog: mixed case, agency spelled out, 12-hour time.
+      const who = [agencyPlainName(incident) || 'Not listed', plainUnitText(incident)].filter(Boolean).join(' · ');
       const gmaps = googleMapsUrl(incident.latitude, incident.longitude);
-      const unitLabel = incidentUnitLabel(incident);
       const approximate = isApproximateLocation(incident);
       const shareId = getIncidentShareId(incident);
 
       let popupHtml = `
         <div class="popup-content sev-${sev}">
-          <div class="popup-title">${escapeHtml(incident.description || 'Incident')}</div>
+          <div class="popup-title">${escapeHtml(plainCase(incident.description || 'Incident'))}</div>
           ${DELAYED_CLOSED_SOURCES.has(incident.source) ? '<div class="popup-detail">Closed police call · 24h publication delay</div>' : ''}
-          <div class="popup-detail"><span class="popup-label">Location</span>${escapeHtml(locationStr)}</div>
+          <div class="popup-detail"><span class="popup-label">Location</span>${escapeHtml(plainLocationText(incident))}</div>
           ${approximate ? '<div class="popup-detail"><span class="popup-label">Map</span><span class="location-accuracy-note">Approximate Location</span></div>' : ''}
-          <div class="popup-detail" title="Source-reported Central time. For undated feeds, date is estimated from first observation."><span class="popup-label">Time</span>${escapeHtml(incidentTimeLabel(incident))}</div>
-          <div class="popup-detail"><span class="popup-label">Agency</span>${escapeHtml(agencyDisplay)} &bull; ${escapeHtml(unitLabel)}</div>
+          <div class="popup-detail" title="Central time reported by the feed (${escapeHtml(incidentTimeLabel(incident))})"><span class="popup-label">Time</span>${escapeHtml(friendlyTimeLabel(incident).long)}</div>
+          <div class="popup-detail"><span class="popup-label">Agency</span>${escapeHtml(who)}</div>
           <div class="popup-detail"><span class="popup-label">Severity</span>${escapeHtml(severityLabel(sev))}</div>
           <a class="popup-link" href="${gmaps}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>
           <a class="popup-link" href="${nearbyReportUrl(incident.latitude, incident.longitude)}">Past incidents near here</a>
