@@ -1,0 +1,16 @@
+[
+  {"raw": "MEDICAL EMERGENCY", "plain": "Medical Emergency"},
+  {"raw": "CADDO EMS EVENT", "plain": "Caddo EMS Event"},
+  {"raw": "N MARKET ST & I-49", "plain": "N Market St & I-49"},
+  {"raw": "E 73RD RD @ THORNHILL AV & LINE AV", "plain": "E 73rd Rd @ Thornhill Av & Line Av"},
+  {"raw": "1ST ST & 22ND ST", "plain": "1st St & 22nd St"},
+  {"raw": "077XX Dorsett Dr", "plain": "077XX Dorsett Dr"},
+  {"raw": "4000 BLK RYAN ST, LAKE CHARLES", "plain": "4000 Blk Ryan St, Lake Charles"},
+  {"raw": "TRAFFIC CRASH IN ROADWAY", "plain": "Traffic Crash in Roadway"},
+  {"raw": "AUTO ACCIDENT WITH INJURY", "plain": "Auto Accident with Injury"},
+  {"raw": "HIT AND RUN", "plain": "Hit and Run"},
+  {"raw": "OPEN LINE TO 911", "plain": "Open Line to 911"},
+  {"raw": "AT RISK PERSON", "plain": "At Risk Person"},
+  {"raw": "LOUD MUSIC/NOISE", "plain": "Loud Music/Noise"},
+  {"raw": "S Broad St & Earhart Blvd", "plain": "S Broad St & Earhart Blvd"}
+]

@@ -1056,9 +1056,8 @@
     .shared-incident-banner span {
       font-family: 'Space Grotesk', sans-serif;
       font-variant-numeric: tabular-nums;
-      font-size: 10px;
+      font-size: 12px;
       font-weight: 700;
-      letter-spacing: 0.12em;
     }
 
     .shared-incident-banner strong {
@@ -3794,7 +3793,8 @@
 
       .info-btn {
         position: absolute;
-        top: calc(10px + env(safe-area-inset-top));
+        /* Centered on the logo, with room above the Near me row. */
+        top: calc(6px + env(safe-area-inset-top));
         right: max(12px, env(safe-area-inset-right));
         width: 44px;
         height: 44px;

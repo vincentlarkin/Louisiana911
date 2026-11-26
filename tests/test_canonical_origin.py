@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -311,7 +312,15 @@ class CanonicalOriginTests(unittest.TestCase):
         html = response.get_data(as_text=True)
 
         self.assertEqual(200, response.status_code)
-        self.assertIn('BREAKING - VERY ACTIVE: MASS CASUALTY INCIDENT', html)
+        self.assertIn('<title>Mass Casualty Incident in Shreveport | Louisiana911</title>', html)
+        self.assertIn('<meta property="og:title" content="Mass Casualty Incident in Shreveport">', html)
+        self.assertIn('<meta name="twitter:title" content="Mass Casualty Incident in Shreveport">', html)
+        self.assertIn(
+            '<meta property="og:description" content="Very active call near 100 Test St @ Sample Ave, '
+            'Shreveport. Reported Aug 29 at 2:30 PM. Shreveport Fire, 8 units.">',
+            html,
+        )
+        self.assertNotIn('MASS CASUALTY INCIDENT |', html)
         self.assertIn(
             f'<link rel="canonical" href="https://louisiana911.com/incident/{share_id}">',
             html,
@@ -331,9 +340,42 @@ class CanonicalOriginTests(unittest.TestCase):
             conn.close()
         historical = self.client.get(f'/incident/{share_id}', headers={'Host': 'localhost'})
         historical_html = historical.get_data(as_text=True)
-        self.assertIn('INCIDENT REPORT: MASS CASUALTY INCIDENT', historical_html)
-        self.assertNotIn('BREAKING - VERY ACTIVE: MASS CASUALTY INCIDENT', historical_html)
+        self.assertIn('content="Earlier call near 100 Test St @ Sample Ave, Shreveport.', historical_html)
+        self.assertNotIn('Very active call', historical_html)
         self.assertIn('"is_active":0', historical_html)
+
+    def test_plain_case_matches_the_map_cases(self):
+        cases_path = os.path.join(os.path.dirname(__file__), 'plain_text_cases.json')
+        with open(cases_path, encoding='utf-8') as handle:
+            for case in json.load(handle):
+                with self.subTest(raw=case['raw']):
+                    self.assertEqual(case['plain'], app._plain_case(case['raw']))
+
+    def test_share_preview_text_reads_plainly_for_each_feed(self):
+        title, description = app._share_preview_text({
+            'source': 'caddo', 'agency': 'SPD', 'time': '1118', 'units': 1, 'is_active': 1,
+            'description': 'LOUD MUSIC/NOISE', 'street': 'E 73RD RD', 'cross_streets': 'THORNHILL AV & LINE AV',
+            'municipality': 'SHV', 'first_seen': '2026-11-26T17:20:00+00:00',
+        })
+        self.assertEqual('Loud Music/Noise in Shreveport', title)
+        self.assertEqual('Active call near E 73rd Rd @ Thornhill Av & Line Av, Shreveport. '
+                         'Reported Nov 26 at 11:18 AM. Shreveport Police, 1 unit.', description)
+
+        title, description = app._share_preview_text({
+            'source': 'lakecharles', 'agency': 'LCPD', 'units': 0, 'is_active': 0,
+            'description': 'HANG UP CALL', 'street': '1700 BLK GIEFFERS ST, LAKE CHARLES',
+            'municipality': 'Lake Charles', 'first_seen': '2026-11-25T21:10:00+00:00',
+        })
+        self.assertEqual('Hang Up Call in Lake Charles', title)
+        self.assertEqual('Closed call near 1700 Blk Gieffers St, Lake Charles. '
+                         'Reported Nov 25 at 3:10 PM, posted a day later. Lake Charles Police.', description)
+
+        title, description = app._share_preview_text({
+            'source': 'caddo', 'agency': 'CSO', 'units': 0, 'is_active': 0,
+            'description': 'THEFT', 'street': '', 'cross_streets': '', 'municipality': 'CADD',
+        })
+        self.assertEqual('Theft in Caddo Parish', title)
+        self.assertEqual('Earlier call in Caddo Parish. Caddo Sheriff.', description)
 
     def test_missing_or_malformed_incident_share_link_returns_404(self):
         for share_id in ('not-an-incident', 'f' * 32):
