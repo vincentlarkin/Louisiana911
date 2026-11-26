@@ -1,3 +1,4 @@
+import io
 import os
 import json
 import tempfile
@@ -343,6 +344,115 @@ class CanonicalOriginTests(unittest.TestCase):
         self.assertIn('content="Earlier call near 100 Test St @ Sample Ave, Shreveport.', historical_html)
         self.assertNotIn('Very active call', historical_html)
         self.assertIn('"is_active":0', historical_html)
+
+    def _insert_share_incident(self, share_id, **overrides):
+        row = {
+            'hash': share_id, 'agency': 'SPD', 'time': '1118', 'units': 2, 'description': 'MEDICAL EMERGENCY',
+            'street': 'AMHERST', 'cross_streets': 'BURKE ST & QUILEN BLVD', 'municipality': 'SHV',
+            'source': 'caddo', 'latitude': 32.4655, 'longitude': -93.7377,
+            'first_seen': '2026-11-26T17:20:00+00:00', 'last_seen': '2026-11-26T17:25:00+00:00', 'is_active': 1,
+        }
+        row.update(overrides)
+        conn = app.db_connect()
+        try:
+            conn.execute(
+                f"INSERT INTO incidents ({', '.join(row)}) VALUES ({', '.join('?' for _ in row)})",
+                tuple(row.values()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self.addCleanup(self._delete_incident, share_id)
+
+    def test_share_page_points_previews_at_the_call_card(self):
+        share_id = '1123456789abcdef0123456789abcdef'
+        self._insert_share_incident(share_id)
+        html = self.client.get(f'/incident/{share_id}', headers={'Host': 'localhost'}).get_data(as_text=True)
+        card_url = app._share_image_url(share_id, app._share_card(app._find_incident_by_share_id(share_id)))
+        self.assertRegex(card_url, rf'^https://louisiana911\.com/og/incident/{share_id}\.jpg\?v=[0-9a-f]{{12}}$')
+        self.assertIn(f'<meta property="og:image" content="{card_url}">', html)
+        self.assertIn(f'<meta name="twitter:image" content="{card_url}">', html)
+        self.assertIn('<meta property="og:image:type" content="image/jpeg">', html)
+        self.assertIn('<meta property="og:image:width" content="1200">', html)
+        self.assertIn('<meta property="og:image:height" content="630">', html)
+        self.assertIn('content="Map of Medical Emergency near Amherst @ Burke St &amp; Quilen Blvd, Shreveport"', html)
+        self.assertNotIn('https://louisiana911.com/og.png', html)
+
+    def test_call_card_renders_once_then_comes_from_the_disk_cache(self):
+        from PIL import Image
+        share_id = '2123456789abcdef0123456789abcdef'
+        self._insert_share_incident(share_id)
+        tiles = []
+
+        def fake_tile(z, x, y):
+            tiles.append((z, x, y))
+            return Image.new('RGB', (512, 512), (40, 44, 52))
+
+        with tempfile.TemporaryDirectory() as cache_dir, \
+                patch.dict(os.environ, {'LOUISIANA911_SHARE_IMAGE_CACHE_DIR': cache_dir}), \
+                patch.object(app, '_fetch_share_map_tile', side_effect=fake_tile):
+            signature = app._share_card_signature(app._share_card(app._find_incident_by_share_id(share_id)))
+            first = self.client.get(f'/og/incident/{share_id}.jpg?v={signature}', headers={'Host': 'localhost'})
+            self.assertEqual(200, first.status_code)
+            self.assertEqual('image/jpeg', first.mimetype)
+            self.assertEqual('public, max-age=604800, immutable', first.headers['Cache-Control'])
+            self.assertEqual('noindex', first.headers['X-Robots-Tag'])
+            with Image.open(io.BytesIO(first.data)) as card:
+                self.assertEqual((1200, 630), card.size)
+            self.assertTrue(tiles)
+            self.assertTrue(all(z == 15 for z, _, _ in tiles))
+            self.assertEqual([f'{share_id}-{signature}.jpg'], os.listdir(cache_dir))
+
+            tiles.clear()
+            again = self.client.get(f'/og/incident/{share_id}.jpg?v={signature}', headers={'Host': 'localhost'})
+            self.assertEqual(first.data, again.data)
+            self.assertEqual([], tiles)
+
+            # An old ?v= still gets the current card, just not cached for good.
+            stale = self.client.get(f'/og/incident/{share_id}.jpg?v=000000000000', headers={'Host': 'localhost'})
+            self.assertEqual('public, max-age=3600', stale.headers['Cache-Control'])
+
+    def test_call_card_without_map_tiles_is_drawn_but_cached_briefly(self):
+        share_id = '3123456789abcdef0123456789abcdef'
+        self._insert_share_incident(share_id)
+        with tempfile.TemporaryDirectory() as cache_dir, \
+                patch.dict(os.environ, {'LOUISIANA911_SHARE_IMAGE_CACHE_DIR': cache_dir}), \
+                patch.object(app, '_fetch_share_map_tile', return_value=None):
+            response = self.client.get(f'/og/incident/{share_id}.jpg', headers={'Host': 'localhost'})
+            self.assertEqual(200, response.status_code)
+            self.assertEqual('public, max-age=300', response.headers['Cache-Control'])
+            self.assertEqual([], os.listdir(cache_dir))
+
+        # No coordinates at all: the parish-outline card is the finished card.
+        share_id = '4123456789abcdef0123456789abcdef'
+        self._insert_share_incident(share_id, latitude=None, longitude=None, street='', cross_streets='')
+        with tempfile.TemporaryDirectory() as cache_dir, \
+                patch.dict(os.environ, {'LOUISIANA911_SHARE_IMAGE_CACHE_DIR': cache_dir}), \
+                patch.object(app, '_fetch_share_map_tile', side_effect=AssertionError('no tiles needed')):
+            response = self.client.get(f'/og/incident/{share_id}.jpg', headers={'Host': 'localhost'})
+            self.assertEqual(200, response.status_code)
+            self.assertEqual(1, len(os.listdir(cache_dir)))
+
+        missing = self.client.get(f'/og/incident/{"e" * 32}.jpg', headers={'Host': 'localhost'})
+        self.assertEqual(404, missing.status_code)
+
+    def test_call_card_words_and_colors(self):
+        card = app._share_card({
+            'source': 'batonrouge', 'agency': 'LAW', 'time': '1731', 'units': 1, 'is_active': 0,
+            'description': 'TRAFFIC CRASH IN ROADWAY', 'street': '10400 - 10499 S MALL DR',
+            'cross_streets': 'ANDREA DR / SIEGEN LN', 'municipality': 'Baton Rouge',
+            'latitude': 30.388, 'longitude': -91.075, 'geocode_quality': 'approximate-block',
+            'first_seen': '2026-10-09T22:31:00+00:00',
+        })
+        self.assertEqual('Traffic Crash in Roadway', card.title)
+        self.assertEqual(('Earlier call', 'Moderate'), (card.status, card.severity))
+        self.assertEqual((255, 184, 48), card.severity_color)
+        self.assertEqual('10400 - 10499 S Mall Dr @ Andrea Dr / Siegen Ln, Baton Rouge', card.place)
+        self.assertEqual('Oct 9, 5:31 PM · Law enforcement · 1 unit', card.details)
+        self.assertTrue(card.approximate)
+        self.assertFalse(card.active)
+        # Coordinates outside the map's Louisiana bounds are not drawn.
+        self.assertIsNone(app._share_card({'source': 'caddo', 'latitude': 0, 'longitude': 0}).latitude)
 
     def test_plain_case_matches_the_map_cases(self):
         cases_path = os.path.join(os.path.dirname(__file__), 'plain_text_cases.json')

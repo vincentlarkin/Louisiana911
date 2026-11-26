@@ -7,3 +7,4 @@ apscheduler==3.11.3
 gunicorn==26.2.0; platform_system != "Windows"
 tzdata==2026.6
 google-auth==2.62.0
+pillow==13.0.0
