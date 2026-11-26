@@ -1164,32 +1164,153 @@ def _incident_share_payload(incident: dict) -> dict:
     }
 
 
+# Plain wording for link previews. These mirror plainCase(), agencyPlainName(),
+# areaPlainName() and cleanLocationDisplayValue() in public/index.html, and
+# tests/plain_text_cases.json keeps the two in step.
+PLAIN_CASE_KEEP_UPPER = frozenset({
+    'EMS', 'DWI', 'DUI', 'MVA', 'NOPD', 'SPD', 'SFD', 'CSO', 'LCPD', 'ATV', 'ATM',
+    'CO', 'PD', 'FD', 'EMT', 'II', 'III', 'IV', 'US', 'LA', 'I', 'N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW',
+})
+PLAIN_CASE_SMALL_WORDS = frozenset({'A', 'AN', 'AND', 'AT', 'BY', 'FOR', 'IN', 'OF', 'ON', 'OR', 'THE', 'TO', 'WITH'})
+_PLAIN_CASE_WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9']*")
+_PLAIN_CASE_ORDINAL = re.compile(r'^(\d+)(ST|ND|RD|TH)$', re.IGNORECASE)
+_LOCATION_TRAILING_NUMBER = re.compile(
+    r'\b(ALY|ALLEY|AV|AVE|AVENUE|BLVD|BOULEVARD|CIR|CIRCLE|CT|COURT|DR|DRIVE|LN|LANE|LOOP|PASSWAY|PKWY|PARKWAY'
+    r'|PL|PLACE|RD|ROAD|ST|STREET|TER|TERRACE|TRL|TRAIL|WAY)\s+\d+\b(?=\s*(?:&|/|@|$))',
+    re.IGNORECASE,
+)
+SHARE_AGENCY_NAMES = {
+    'caddo': {'SPD': 'Shreveport Police', 'SFD': 'Shreveport Fire', 'CSO': 'Caddo Sheriff', 'EMS': 'EMS'},
+    'neworleans': {'NOPD': 'New Orleans Police'},
+    'lakecharles': {'LCPD': 'Lake Charles Police'},
+    'sulphur': {'SPD': 'Sulphur Police'},
+    'batonrouge': {'LAW': 'Law enforcement'},
+}
+SHARE_CADDO_AREAS = {
+    'BLN': 'Blanchard', 'CADD': '', 'GIL': 'Gilliam', 'GWD': 'Greenwood', 'HOS': 'Hosston',
+    'MPT': 'Mooringsport', 'SHV': 'Shreveport', 'VIV': 'Vivian',
+}
+
+
+def _plain_case(text) -> str:
+    """Turn ALL-CAPS feed text into 'Medical Emergency' / 'E 73rd St & Line Av'."""
+    first = True
+
+    def word(match):
+        nonlocal first
+        token = match.group(0)
+        upper = token.upper()
+        was_first, first = first, False
+        if token[0].isdigit():
+            ordinal = _PLAIN_CASE_ORDINAL.match(token)
+            return f'{ordinal.group(1)}{ordinal.group(2).lower()}' if ordinal else upper
+        if upper in PLAIN_CASE_KEEP_UPPER:
+            return upper
+        if not was_first and upper in PLAIN_CASE_SMALL_WORDS:
+            return upper.lower()
+        return upper[0] + upper[1:].lower()
+
+    return _PLAIN_CASE_WORD.sub(word, str(text or ''))
+
+
+def _share_agency_name(incident: dict) -> str:
+    source = _normalize_incident_source_for_read(incident.get('source'))
+    raw = _clean_ws(str(incident.get('agency') or '')).upper()
+    if not raw or raw == 'UNKNOWN':
+        return ''
+    known = SHARE_AGENCY_NAMES.get(source, {}).get(raw)
+    if known:
+        return known
+    caddo_fire = re.fullmatch(r'CFD\s*0*(\d+)', raw) if source == 'caddo' else None
+    if caddo_fire:
+        return f'Caddo Fire District {caddo_fire.group(1)}'
+    if source == 'lafayette':
+        units = []
+        for unit in re.findall(r'\b(FIRE|POLICE|SHERIFF)\b', raw):
+            if unit not in units:
+                units.append(unit)
+        return _plain_case(' / '.join(units) or raw)
+    return _plain_case(raw) if len(raw) > 4 else raw
+
+
+def _share_area_name(incident: dict) -> str:
+    raw = _clean_ws(str(incident.get('municipality') or ''))
+    if not raw or raw.upper() == 'UNKNOWN':
+        return ''
+    upper = raw.upper()
+    if _normalize_incident_source_for_read(incident.get('source')) == 'caddo' and upper in SHARE_CADDO_AREAS:
+        return SHARE_CADDO_AREAS[upper]
+    return _plain_case(raw) if raw == upper else raw
+
+
+def _share_place_text(incident: dict) -> str:
+    """'Amherst @ Burke St & Quilen Blvd, Shreveport', or '' when no street is listed."""
+    parts = []
+    for field in ('street', 'cross_streets'):
+        value = _clean_ws(_LOCATION_TRAILING_NUMBER.sub(r'\1', str(incident.get(field) or '')))
+        if value:
+            parts.append(value)
+    if not parts:
+        return ''
+    place = _plain_case(' @ '.join(parts))
+    area = _share_area_name(incident)
+    return f'{place}, {area}' if area and area.lower() not in place.lower() else place
+
+
+def _share_reported_text(incident: dict) -> str:
+    """'Nov 26 at 11:18 AM' in Louisiana time, or '' when the call has no usable date."""
+    stamp = _parse_iso_datetime(_incident_reported_at(incident) or incident.get('first_seen'))
+    if stamp is None:
+        return ''
+    local = stamp.astimezone(CENTRAL_TZ)
+    return f"{local:%b} {local.day} at {local.hour % 12 or 12}:{local:%M} {'PM' if local.hour >= 12 else 'AM'}"
+
+
+def _share_preview_text(incident: dict) -> tuple[str, str]:
+    """Return (title, description) for link previews in plain, mixed-case words.
+
+    Example: ('Medical Emergency in Shreveport', 'Active call near Amherst @
+    Burke St & Quilen Blvd, Shreveport. Reported Nov 26 at 11:18 AM.
+    Shreveport Fire, 2 units.')
+    """
+    source = _normalize_incident_source_for_read(incident.get('source'))
+    what = _plain_case(_clean_ws(str(incident.get('description') or '')) or 'Incident')
+    area = _share_area_name(incident) or REPORT_SOURCE_LABELS.get(source, 'Louisiana')
+    title = f'{what} in {area}'
+
+    units = int(incident.get('units') or 0)
+    is_active = bool(incident.get('is_active'))
+    delayed = source in DELAYED_CLOSED_CALL_SOURCES
+    if delayed:
+        status = 'Closed call'
+    elif is_active and units >= 5:
+        status = 'Very active call'
+    elif is_active:
+        status = 'Open call' if source == 'neworleans' else 'Active call'
+    else:
+        status = 'Earlier call'
+
+    place = _share_place_text(incident)
+    sentences = [f'{status} near {place}.' if place else f'{status} in {area}.']
+    reported = _share_reported_text(incident)
+    if reported:
+        sentences.append(f'Reported {reported}, posted a day later.' if delayed else f'Reported {reported}.')
+    who = [_share_agency_name(incident)]
+    if units > 0:
+        who.append(f"{units} unit{'s' if units != 1 else ''}")
+    who_text = ', '.join(part for part in who if part)
+    if who_text:
+        sentences.append(f'{who_text[0].upper()}{who_text[1:]}.')
+    return title, ' '.join(sentences)
+
+
 def _serve_shared_incident_page(incident: dict):
     """Serve the map shell with incident-specific social metadata and data."""
     payload = _incident_share_payload(incident)
     share_id = str(payload['share_id']).lower()
     share_url = f'https://{CANONICAL_SITE_HOST}/incident/{share_id}'
-    description = str(payload.get('description') or 'Public safety incident').strip()
-    location = _incident_location_label(incident) or str(payload.get('municipality') or 'Louisiana')
-    units = int(payload.get('units') or 0)
-    is_active = bool(payload.get('is_active'))
-
-    if payload.get('source') in DELAYED_CLOSED_CALL_SOURCES:
-        status_label = 'CLOSED POLICE CALL'
-        city = REPORT_SOURCE_LABELS.get(payload.get('source'), 'Police')
-        summary_lead = f'{city} police call published with a 24-hour delay'
-    elif is_active and units >= 5:
-        status_label = 'BREAKING - VERY ACTIVE'
-        summary_lead = f'Very active public incident with {units} assigned units'
-    elif is_active:
-        status_label = 'ACTIVE INCIDENT'
-        summary_lead = 'Active public incident'
-    else:
-        status_label = 'INCIDENT REPORT'
-        summary_lead = 'Historical public incident'
-
-    page_title = f'{status_label}: {description} | Louisiana911'
-    page_description = f'{summary_lead}: {description} near {location}. Public feed details may change.'
+    preview_title, page_description = _share_preview_text(incident)
+    page_title = f'{preview_title} | Louisiana911'
 
     index_html = _read_map_index_html()
 
@@ -1199,6 +1320,8 @@ def _serve_shared_incident_page(incident: dict):
     index_html = index_html.replace('<head>', '<head>\n  <base href="/">', 1)
 
     escaped_title = html_module.escape(page_title, quote=True)
+    # og:site_name already shows Louisiana911 above the preview title.
+    escaped_preview_title = html_module.escape(preview_title, quote=True)
     escaped_description = html_module.escape(page_description, quote=True)
     escaped_url = html_module.escape(share_url, quote=True)
     index_html = index_html.replace(
@@ -1219,7 +1342,7 @@ def _serve_shared_incident_page(incident: dict):
     )
     index_html = index_html.replace(
         '<meta property="og:title" content="Louisiana 911 Calls &amp; Caddo 911 Live Map">',
-        f'<meta property="og:title" content="{escaped_title}">',
+        f'<meta property="og:title" content="{escaped_preview_title}">',
     )
     index_html = index_html.replace(
         '<meta property="og:description" content="Live Caddo 911 calls and traffic feeds alongside delayed New Orleans records and Lake Charles closed calls on one Louisiana map.">',
@@ -1235,7 +1358,7 @@ def _serve_shared_incident_page(incident: dict):
     )
     index_html = index_html.replace(
         '<meta name="twitter:title" content="Louisiana 911 Calls &amp; Caddo 911 Live Map">',
-        f'<meta name="twitter:title" content="{escaped_title}">',
+        f'<meta name="twitter:title" content="{escaped_preview_title}">',
     )
     index_html = index_html.replace(
         '<meta name="twitter:description" content="Live and daily public emergency incident feeds from across Louisiana on one map.">',

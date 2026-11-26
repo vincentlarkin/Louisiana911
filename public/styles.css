@@ -1056,9 +1056,8 @@
     .shared-incident-banner span {
       font-family: 'Space Grotesk', sans-serif;
       font-variant-numeric: tabular-nums;
-      font-size: 10px;
+      font-size: 12px;
       font-weight: 700;
-      letter-spacing: 0.12em;
     }
 
     .shared-incident-banner strong {

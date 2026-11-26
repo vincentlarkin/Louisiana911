@@ -85,8 +85,8 @@ test('sharing reports successful native/copy outcomes without counting cancellat
       navigator: outcome === 'native' ? { share: async () => {} }
         : outcome === 'cancel' ? { share: async () => { throw { name: 'AbortError' }; } } : {},
       incidentShareUrl: () => 'https://louisiana911.com/incident/private-id',
-      incidentActivityState: () => ({ label: 'ACTIVE' }),
-      incidentLocationText: () => 'private location',
+      plainCase: text => text, areaPlainName: () => 'Shreveport',
+      incidentLocationText: () => 'private location', plainLocationText: () => 'private location',
       normalizeSource: () => 'caddo', showIncidentShareNotice() {},
       copyTextToClipboard: async () => { if (outcome === 'failed') throw new Error('denied'); },
       console: { error() {} },
@@ -101,6 +101,26 @@ test('sharing reports successful native/copy outcomes without counting cancellat
       assert.equal(JSON.stringify(events).includes('private'), false);
     }
   }
+});
+
+test('share sheet text is plain words with the street and town', async () => {
+  const shared = [];
+  const ctx = loadFunctions(['normalizeSource', 'plainCase', 'areaPlainName', 'cleanLocationDisplayValue',
+    'incidentLocationText', 'plainLocationText', 'shareIncident'], {
+    navigator: { share: async data => { shared.push(data); } },
+    incidentShareUrl: () => 'https://louisiana911.com/incident/abc',
+    showIncidentShareNotice() {},
+  });
+  await ctx.shareIncident({ source: 'caddo', description: 'MEDICAL EMERGENCY', street: 'AMHERST',
+    cross_streets: 'BURKE ST & QUILEN BLVD', municipality: 'SHV' });
+  await ctx.shareIncident({ source: 'caddo', description: 'THEFT', street: '', cross_streets: '', municipality: 'CADD' });
+  assert.deepEqual({ ...shared[0] }, {
+    title: 'Medical Emergency in Shreveport',
+    text: 'Medical Emergency near Amherst @ Burke St & Quilen Blvd, Shreveport',
+    url: 'https://louisiana911.com/incident/abc',
+  });
+  assert.equal(shared[1].title, 'Theft');
+  assert.equal(shared[1].text, 'Theft');
 });
 
 test('hang-up and open-line calls are blue; suicide attempts are solid red', () => {
@@ -793,8 +813,10 @@ test('map severity matches the shared cases used by report counts', () => {
 test('plain wording: mixed case, spelled-out agencies and areas, plain severity words', () => {
   const ctx = loadFunctions(['normalizeSource', 'getIncidentAgencyUnits', 'formatAgencyDisplay', 'plainCase',
     'agencyPlainName', 'areaPlainName', 'severityLabel']);
-  assert.equal(ctx.plainCase('CADDO EMS EVENT'), 'Caddo EMS Event');
-  assert.equal(ctx.plainCase('N MARKET ST & I-49'), 'N Market St & I-49');
+  // Same cases as app.py _plain_case(), which writes the link-preview text.
+  for (const { raw, plain } of JSON.parse(fs.readFileSync(path.join(__dirname, 'plain_text_cases.json'), 'utf8'))) {
+    assert.equal(ctx.plainCase(raw), plain, raw);
+  }
   assert.equal(ctx.agencyPlainName({ source: 'caddo', agency: 'SPD' }), 'Shreveport Police');
   assert.equal(ctx.agencyPlainName({ source: 'sulphur', agency: 'SPD' }), 'Sulphur Police');
   assert.equal(ctx.agencyPlainName({ source: 'caddo', agency: 'CFD3' }), 'Caddo Fire District 3');
