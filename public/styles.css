@@ -3793,7 +3793,8 @@
 
       .info-btn {
         position: absolute;
-        top: calc(10px + env(safe-area-inset-top));
+        /* Centered on the logo, with room above the Near me row. */
+        top: calc(6px + env(safe-area-inset-top));
         right: max(12px, env(safe-area-inset-right));
         width: 44px;
         height: 44px;

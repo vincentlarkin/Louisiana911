@@ -913,16 +913,24 @@ test('parish outlines load once from the local file, never the national county d
   assert.deepEqual(outlines.features.map(f => f.id).sort(), ['22017', '22033', '22055', '22071']);
   const requested = [];
   const added = [];
+  const moveHandlers = [];
   const ctx = loadFunctions(['fetchOutlineGeoJson', 'loadParishOutline'], {
-    parishOutlineLayer: null, parishOutlineRequest: null, map: {},
+    parishOutlineLayer: null, parishOutlineRequest: null,
+    map: { on: (name, handler) => { if (name === 'move') moveHandlers.push(handler); } },
     fetch: async url => { requested.push(url); return { ok: true, json: async () => outlines }; },
     getParishOutlineStyle: () => ({}),
-    L: { geoJSON: data => ({ addTo() { added.push(data); } }) },
+    L: {
+      svg: options => ({ options }),
+      geoJSON: (data, options) => ({ addTo() { added.push({ data, options }); } }),
+    },
   });
   // Switching to the map view twice quickly must not add the outline twice.
   await Promise.all([ctx.loadParishOutline(), ctx.loadParishOutline()]);
   assert.deepEqual(requested, ['parish-outlines.json']);
   assert.equal(added.length, 1);
+  // Its own SVG layer, drawn past the screen edges, keeps up with a drag.
+  assert.deepEqual({ ...added[0].options.renderer.options }, { pane: 'parish', padding: 0.5 });
+  assert.equal(moveHandlers.length, 1);
   assert.doesNotMatch(html, /geojson-counties-fips|data\.nola\.gov\/resource\/tu2j-8k42/);
 });
 

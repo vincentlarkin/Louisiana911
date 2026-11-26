@@ -932,8 +932,20 @@
         return;
       }
 
-      parishOutlineLayer = L.geoJSON(outlines, { style: getParishOutlineStyle(), interactive: false });
+      // The map's shared canvas only draws a little past the screen and
+      // redraws when a drag ends, so the border and tint used to arrive late
+      // with a hard edge. The outline gets its own SVG layer drawn half a
+      // screen past every side, and redraws mid-drag only when the view
+      // reaches that edge. (_bounds/_update are Leaflet 1.9.4 internals.)
+      const parishRenderer = L.svg({ pane: 'parish', padding: 0.5 });
+      parishOutlineLayer = L.geoJSON(outlines, { style: getParishOutlineStyle(), interactive: false, renderer: parishRenderer });
       parishOutlineLayer.addTo(map);
+      map.on('move', () => {
+        const drawn = parishRenderer._bounds;
+        if (!drawn || map._animatingZoom) return;
+        const view = L.bounds(map.containerPointToLayerPoint([0, 0]), map.containerPointToLayerPoint(map.getSize()));
+        if (!drawn.contains(view)) parishRenderer._update();
+      });
     }
     
     // Legend drawer (auto-collapse on narrow screens)
