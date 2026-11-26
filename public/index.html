@@ -22,11 +22,11 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta property="og:title" content="Louisiana 911 Calls &amp; Caddo 911 Live Map">
   <meta property="og:description" content="Live Caddo 911 calls and traffic feeds alongside delayed New Orleans records and Lake Charles closed calls on one Louisiana map.">
-  <meta property="og:image" content="https://louisiana911.com/og.png">
-  <meta property="og:image:type" content="image/png">
-  <meta property="og:image:width" content="1733">
-  <meta property="og:image:height" content="908">
-  <meta property="og:image:alt" content="Louisiana 911 public emergency incident monitor">
+  <meta property="og:image" content="https://louisiana911.com/og/page/louisiana.jpg?v=5c349d788668">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Map of Louisiana with Caddo, East Baton Rouge, Lafayette, Orleans and Calcasieu parishes outlined">
   <meta property="og:url" content="https://louisiana911.com/">
   <meta property="og:site_name" content="Louisiana911">
   <meta property="og:locale" content="en_US">
@@ -34,8 +34,8 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Louisiana 911 Calls &amp; Caddo 911 Live Map">
   <meta name="twitter:description" content="Live and daily public emergency incident feeds from across Louisiana on one map.">
-  <meta name="twitter:image" content="https://louisiana911.com/og.png">
-  <meta name="twitter:image:alt" content="Louisiana 911 public emergency incident monitor">
+  <meta name="twitter:image" content="https://louisiana911.com/og/page/louisiana.jpg?v=5c349d788668">
+  <meta name="twitter:image:alt" content="Map of Louisiana with Caddo, East Baton Rouge, Lafayette, Orleans and Calcasieu parishes outlined">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -257,7 +257,7 @@
         <details class="info-maker">
           <summary class="info-maker-head">
             <img class="info-maker-emblem" src="images/vl-emblem.webp" alt="" width="36" height="54" loading="lazy" decoding="async">
-            <span class="info-maker-text"><span class="info-maker-name">Made by <strong>Vincent Larkin</strong></span><span class="info-version">Version 4.12.1</span></span>
+            <span class="info-maker-text"><span class="info-maker-name">Made by <strong>Vincent Larkin</strong></span><span class="info-version">Version 4.12.2</span></span>
             <svg class="info-maker-toggle" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </summary>
           <div class="info-maker-links">
@@ -909,12 +909,12 @@
       return response.json();
     }
 
-    // Caddo, East Baton Rouge and Lafayette from Census TIGER/Line county
-    // boundaries (TIGERweb, simplified to about 13 m so they follow the rivers);
-    // Orleans from the City of New Orleans' own boundary, which follows the
-    // river geometry the NOPD feed uses. A ~105 KB local file (about 30 KB
-    // gzipped) replaces a 3 MB national county download and a slow
-    // data.nola.gov request.
+    // Caddo, East Baton Rouge, Lafayette and Calcasieu from Census TIGER/Line
+    // county boundaries (TIGERweb, simplified to about 13 m so they follow the
+    // rivers); Orleans from the City of New Orleans' own boundary, which
+    // follows the river geometry the NOPD feed uses. A ~120 KB local file
+    // (about 35 KB gzipped) replaces a 3 MB national county download and a
+    // slow data.nola.gov request.
     let parishOutlineRequest = null;
     async function loadParishOutline() {
       if (parishOutlineLayer || parishOutlineRequest) return parishOutlineRequest;
@@ -4204,7 +4204,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js?v=4.12.1', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('service-worker.js?v=4.12.2', { updateViaCache: 'none' })
           .then((registration) => registration.update())
           .catch((error) => {
             console.warn('Service worker registration failed:', error);

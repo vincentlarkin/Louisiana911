@@ -1,3 +1,4 @@
+import dataclasses
 import io
 import os
 import json
@@ -435,6 +436,77 @@ class CanonicalOriginTests(unittest.TestCase):
 
         missing = self.client.get(f'/og/incident/{"e" * 32}.jpg', headers={'Host': 'localhost'})
         self.assertEqual(404, missing.status_code)
+
+    def test_every_page_points_previews_at_its_card(self):
+        from scripts.update_preview_tags import PAGE_FILES, update_page
+        public = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'public')
+        self.assertEqual(sorted(name for name in os.listdir(public) if name.endswith('.html')), sorted(PAGE_FILES))
+        for name, slug in PAGE_FILES.items():
+            with self.subTest(name):
+                with open(os.path.join(public, name), encoding='utf-8') as handle:
+                    html = handle.read()
+                self.assertEqual(update_page(html, slug, app), html,
+                                 'Preview tags are out of date: run python scripts/update_preview_tags.py')
+                url = app._page_image_url(slug)
+                self.assertRegex(url, rf'^https://louisiana911\.com/og/page/{slug}\.jpg\?v=[0-9a-f]{{12}}$')
+                self.assertIn(f'<meta property="og:image" content="{url}">', html)
+                self.assertIn(f'<meta name="twitter:image" content="{url}">', html)
+                self.assertIn('<meta name="twitter:card" content="summary_large_image">', html)
+                self.assertNotIn('og.png', html)
+
+        # Coverage pages carry their own card into the map shell.
+        html = self.client.get('/coverage/sulphur/', headers={'Host': 'localhost'}).get_data(as_text=True)
+        self.assertIn(f'<meta property="og:image" content="{app._page_image_url("sulphur")}">', html)
+        self.assertIn('<meta property="og:image:alt" content="Map of Calcasieu Parish, including Sulphur">', html)
+        self.assertNotIn(app._page_image_url('louisiana'), html)
+
+    def test_page_card_renders_once_then_comes_from_the_disk_cache(self):
+        from PIL import Image
+        tiles = []
+
+        def fake_tile(z, x, y, style='dark_all'):
+            tiles.append((style, z))
+            return Image.new('RGB', (512, 512), (40, 44, 52))
+
+        card, _ = app.PAGE_CARDS['caddo']
+        signature = app._page_card_signature(card)
+        with tempfile.TemporaryDirectory() as cache_dir, \
+                patch.dict(os.environ, {'LOUISIANA911_SHARE_IMAGE_CACHE_DIR': cache_dir}), \
+                patch.object(app, '_fetch_share_map_tile', side_effect=fake_tile):
+            first = self.client.get(f'/og/page/caddo.jpg?v={signature}', headers={'Host': 'localhost'})
+            self.assertEqual(200, first.status_code)
+            self.assertEqual('image/jpeg', first.mimetype)
+            self.assertEqual('public, max-age=604800, immutable', first.headers['Cache-Control'])
+            with Image.open(io.BytesIO(first.data)) as image:
+                self.assertEqual((1200, 630), image.size)
+            # The page cards label the towns themselves.
+            self.assertTrue(tiles)
+            self.assertEqual({'dark_nolabels'}, {style for style, _ in tiles})
+            self.assertEqual([f'page-caddo-{signature}.jpg'], os.listdir(cache_dir))
+
+            tiles.clear()
+            again = self.client.get(f'/og/page/caddo.jpg?v={signature}', headers={'Host': 'localhost'})
+            self.assertEqual(first.data, again.data)
+            self.assertEqual([], tiles)
+
+        with tempfile.TemporaryDirectory() as cache_dir, \
+                patch.dict(os.environ, {'LOUISIANA911_SHARE_IMAGE_CACHE_DIR': cache_dir}), \
+                patch.object(app, '_fetch_share_map_tile', return_value=None):
+            outline_only = self.client.get('/og/page/louisiana.jpg', headers={'Host': 'localhost'})
+            self.assertEqual(200, outline_only.status_code)
+            self.assertEqual('public, max-age=300', outline_only.headers['Cache-Control'])
+            self.assertEqual([], os.listdir(cache_dir))
+
+        self.assertEqual(404, self.client.get('/og/page/texas.jpg', headers={'Host': 'localhost'}).status_code)
+
+    def test_page_card_urls_change_when_a_card_or_outline_changes(self):
+        card, _ = app.PAGE_CARDS['lake-charles']
+        before = app._page_card_signature(card)
+        self.assertNotEqual(before, app._page_card_signature(dataclasses.replace(card, title='Lake Charles calls')))
+        with patch.object(app.share_image, 'outline_digest', return_value='0' * 12):
+            self.assertNotEqual(before, app._page_card_signature(card))
+        with patch.object(app, 'SHARE_CARD_VERSION', 'next'):
+            self.assertNotEqual(before, app._page_card_signature(card))
 
     def test_call_card_words_and_colors(self):
         card = app._share_card({

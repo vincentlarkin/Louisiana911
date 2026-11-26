@@ -1322,8 +1322,10 @@ def _share_preview_text(incident: dict) -> tuple[str, str]:
 
 
 # Preview image (share_image.py draws it). Colors match getSeverityColor() and
-# severityLabel() in public/index.html.
-SHARE_CARD_VERSION = '1'
+# severityLabel() in public/index.html. Bump SHARE_CARD_VERSION when
+# share_image.py draws differently, so every card gets a new URL.
+# 2: Calcasieu outline for Lake Charles and Sulphur calls without a location.
+SHARE_CARD_VERSION = '2'
 SHARE_SEVERITY_STYLE = {
     'high': ('Serious', (255, 59, 59)),
     'medical': ('Medical', (255, 59, 59)),
@@ -1337,7 +1339,7 @@ SHARE_STATUS_COLORS = {
     'Active call': (255, 59, 59),
     'Open call': (255, 184, 48),
 }
-SHARE_MAP_TILE_URL = 'https://{subdomain}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
+SHARE_MAP_TILE_URL = 'https://{subdomain}.basemaps.cartocdn.com/{style}/{z}/{x}/{y}@2x.png'
 SHARE_IMAGE_RENDER_SLOTS = BoundedSemaphore(2)
 SHARE_IMAGE_CACHE_LIMIT = 4000
 _share_tile_cache: 'OrderedDict[tuple, bytes]' = OrderedDict()
@@ -1421,18 +1423,18 @@ def _write_share_image_cache(path: str, data: bytes) -> None:
         log(f'[SHARE] Could not cache preview image: {error}')
 
 
-def _fetch_share_map_tile(z: int, x: int, y: int):
-    """One CARTO dark basemap tile for the preview image, or None."""
+def _fetch_share_map_tile(z: int, x: int, y: int, style: str = 'dark_all'):
+    """One CARTO dark basemap tile for a preview image, or None."""
     key = _carto_basemap_key()
     if not key:
         return None
-    cache_key = (z, x, y)
+    cache_key = (style, z, x, y)
     with _share_tile_lock:
         data = _share_tile_cache.get(cache_key)
         if data is not None:
             _share_tile_cache.move_to_end(cache_key)
     if data is None:
-        url = SHARE_MAP_TILE_URL.format(subdomain='abcd'[(x + y) % 4], z=z, x=x, y=y)
+        url = SHARE_MAP_TILE_URL.format(subdomain='abcd'[(x + y) % 4], style=style, z=z, x=x, y=y)
         try:
             response = _share_tile_session.get(
                 url, params={'key': key}, timeout=(3, 5),
@@ -1457,6 +1459,136 @@ def _fetch_share_map_tile(z: int, x: int, y: int):
 
 def _share_image_url(share_id: str, card: share_image.ShareCard) -> str:
     return f'https://{CANONICAL_SITE_HOST}/og/incident/{share_id}.jpg?v={_share_card_signature(card)}'
+
+
+# Preview cards for the home page, coverage pages and reports. Each page's
+# og:image carries ?v=<signature>. After changing a card, an outline or
+# SHARE_CARD_VERSION, run scripts/update_preview_tags.py; a test fails until
+# the HTML matches.
+SHARE_ALL_PARISHES = ('22017', '22033', '22055', '22071', '22019')
+SHARE_ALL_PARISHES_ALT = 'Map of Louisiana with Caddo, East Baton Rouge, Lafayette, Orleans and Calcasieu parishes outlined'
+LOUISIANA_BOUNDS = (28.93, -94.05, 33.02, -88.82)
+_SHREVEPORT = ('Shreveport', 32.5093, -93.7501)
+_BATON_ROUGE = ('Baton Rouge', 30.4515, -91.1871)
+_LAFAYETTE = ('Lafayette', 30.2241, -92.0198)
+_NEW_ORLEANS = ('New Orleans', 29.9511, -90.0715)
+_LAKE_CHARLES = ('Lake Charles', 30.2266, -93.2174)
+_SULPHUR = ('Sulphur', 30.2366, -93.3774)
+SHARE_STATE_PLACES = (_SHREVEPORT + ('right',), _LAKE_CHARLES + ('below',), _LAFAYETTE + ('above',),
+                      _BATON_ROUGE + ('right',), _NEW_ORLEANS + ('below',))
+_CALCASIEU_PLACES = (_LAKE_CHARLES + ('right',), _SULPHUR + ('left',))
+_PAGE_LIVE = (255, 59, 59)
+_PAGE_DAILY = (255, 184, 48)
+_PAGE_DELAYED = share_image.TEXT_DIM
+
+
+def _state_card(eyebrow: str, title: str, summary: str, details: str) -> share_image.PageCard:
+    return share_image.PageCard(eyebrow, share_image.GOLD, title, summary, details, SHARE_ALL_PARISHES,
+                                SHARE_STATE_PLACES, LOUISIANA_BOUNDS)
+
+
+PAGE_CARDS = {
+    'louisiana': (_state_card(
+        'Public incident map', 'Louisiana 911',
+        'Live Caddo 911 calls, Baton Rouge and Lafayette traffic, daily New Orleans records, '
+        'and Lake Charles and Sulphur closed calls.',
+        'Caddo · East Baton Rouge · Lafayette · Orleans · Calcasieu'), SHARE_ALL_PARISHES_ALT),
+    'coverage': (_state_card(
+        'Coverage', 'Coverage by city and parish',
+        'Where each feed comes from, how often it updates and what it misses.',
+        'Only Caddo Parish is a live list of 911 calls.'), SHARE_ALL_PARISHES_ALT),
+    'reports': (_state_card(
+        'Reports', 'Incident reports',
+        'Monthly counts by parish and severity, and a search for incidents near an address.',
+        'Dispatch listings, not crime statistics.'), SHARE_ALL_PARISHES_ALT),
+    'caddo': (share_image.PageCard(
+        'Live 911 calls', _PAGE_LIVE, 'Caddo 911',
+        'Police, fire, EMS and sheriff calls in Shreveport and Caddo Parish, checked about once a minute.',
+        'Shreveport Police · Shreveport Fire · Caddo Sheriff · Caddo fire districts', ('22017',),
+        (_SHREVEPORT + ('right',),)),
+        'Map of Caddo Parish, including Shreveport'),
+    'baton-rouge': (share_image.PageCard(
+        'Live traffic incidents', _PAGE_LIVE, 'Baton Rouge',
+        'Crashes, hit-and-runs, stalled vehicles and road blockages in Baton Rouge and East Baton Rouge Parish.',
+        'Traffic only, not most 911 calls', ('22033',), (_BATON_ROUGE + ('right',),)),
+        'Map of East Baton Rouge Parish, including Baton Rouge'),
+    'lafayette': (share_image.PageCard(
+        'Live traffic incidents', _PAGE_LIVE, 'Lafayette Parish',
+        'Current traffic incidents in Lafayette, Broussard, Carencro, Duson, Scott and Youngsville.',
+        'Lafayette Parish Communication District · Traffic only', ('22055',), (_LAFAYETTE + ('right',),)),
+        'Map of Lafayette Parish'),
+    'new-orleans': (share_image.PageCard(
+        'Published daily', _PAGE_DAILY, 'New Orleans',
+        'NOPD calls for service made by residents, at block or intersection level.',
+        'Data.NOLA · Delayed records, not live dispatch', ('22071',), (_NEW_ORLEANS + ('right',),)),
+        'Map of Orleans Parish, New Orleans'),
+    'lake-charles': (share_image.PageCard(
+        'Closed calls, about a day later', _PAGE_DELAYED, 'Lake Charles',
+        'Lake Charles Police Department calls, published about 24 hours after they close.',
+        'LCPD calls only · Approximate locations', ('22019',), _CALCASIEU_PLACES),
+        'Map of Calcasieu Parish, including Lake Charles'),
+    'sulphur': (share_image.PageCard(
+        'Closed calls, about a day later', _PAGE_DELAYED, 'Sulphur',
+        'Sulphur Police Department calls in Sulphur and Westlake, published about 24 hours after they close.',
+        'Sulphur PD calls only · Approximate locations', ('22019',), _CALCASIEU_PLACES),
+        'Map of Calcasieu Parish, including Sulphur'),
+}
+
+
+def _fetch_page_map_tile(z: int, x: int, y: int):
+    """Page cards label the towns themselves, so their tiles have no labels."""
+    return _fetch_share_map_tile(z, x, y, 'dark_nolabels')
+
+
+def _page_card_signature(card: share_image.PageCard) -> str:
+    blob = json.dumps([SHARE_CARD_VERSION, 'page', dataclasses.asdict(card),
+                       share_image.outline_digest(card)], sort_keys=True)
+    return hashlib.sha256(blob.encode('utf-8')).hexdigest()[:12]
+
+
+def _page_image_url(slug: str) -> str:
+    card, _ = PAGE_CARDS[slug]
+    return f'https://{CANONICAL_SITE_HOST}/og/page/{slug}.jpg?v={_page_card_signature(card)}'
+
+
+def _serve_preview_image(path: str, signature: str, render):
+    """Serve a card from the disk cache, drawing it first if needed.
+
+    render() returns (jpeg_bytes, complete). An incomplete card (map tiles
+    failed) is served but not kept, and browsers and Cloudflare recheck it
+    after five minutes.
+    """
+    data = _read_share_image_cache(path)
+    complete = True
+    if data is None:
+        if not SHARE_IMAGE_RENDER_SLOTS.acquire(timeout=10):
+            busy = redirect('/og.png', code=302)
+            busy.headers['Cache-Control'] = 'no-store'
+            return busy
+        try:
+            data = _read_share_image_cache(path)
+            if data is None:
+                data, complete = render()
+                if complete:
+                    _write_share_image_cache(path, data)
+        finally:
+            SHARE_IMAGE_RENDER_SLOTS.release()
+
+    response = app.response_class(data, mimetype='image/jpeg')
+    if not complete:
+        response.headers['Cache-Control'] = 'public, max-age=300'
+    elif request.args.get('v') == signature:
+        response.headers['Cache-Control'] = 'public, max-age=604800, immutable'
+    else:
+        response.headers['Cache-Control'] = 'public, max-age=3600'
+    response.headers['X-Robots-Tag'] = 'noindex'
+    return response
+
+
+def _set_meta_content(html: str, attribute: str, name: str, content: str) -> str:
+    """Replace the content of <meta {attribute}="{name}" ...> (content already escaped)."""
+    pattern = re.compile(rf'<meta {attribute}="{re.escape(name)}" content="[^"]*">')
+    return pattern.sub(lambda _: f'<meta {attribute}="{name}" content="{content}">', html, count=1)
 
 
 def _serve_shared_incident_page(incident: dict):
@@ -1524,23 +1656,16 @@ def _serve_shared_incident_page(incident: dict):
     image_url = html_module.escape(_share_image_url(share_id, card), quote=True)
     image_alt = html_module.escape(
         f"Map of {card.title} near {card.place}" if card.place else preview_title, quote=True)
-    for old_tag, new_tag in (
-        ('<meta property="og:image" content="https://louisiana911.com/og.png">',
-         f'<meta property="og:image" content="{image_url}">'),
-        ('<meta property="og:image:type" content="image/png">',
-         '<meta property="og:image:type" content="image/jpeg">'),
-        ('<meta property="og:image:width" content="1733">',
-         f'<meta property="og:image:width" content="{share_image.WIDTH}">'),
-        ('<meta property="og:image:height" content="908">',
-         f'<meta property="og:image:height" content="{share_image.HEIGHT}">'),
-        ('<meta property="og:image:alt" content="Louisiana 911 public emergency incident monitor">',
-         f'<meta property="og:image:alt" content="{image_alt}">'),
-        ('<meta name="twitter:image" content="https://louisiana911.com/og.png">',
-         f'<meta name="twitter:image" content="{image_url}">'),
-        ('<meta name="twitter:image:alt" content="Louisiana 911 public emergency incident monitor">',
-         f'<meta name="twitter:image:alt" content="{image_alt}">'),
+    for attribute, name, content in (
+        ('property', 'og:image', image_url),
+        ('property', 'og:image:type', 'image/jpeg'),
+        ('property', 'og:image:width', str(share_image.WIDTH)),
+        ('property', 'og:image:height', str(share_image.HEIGHT)),
+        ('property', 'og:image:alt', image_alt),
+        ('name', 'twitter:image', image_url),
+        ('name', 'twitter:image:alt', image_alt),
     ):
-        index_html = index_html.replace(old_tag, new_tag, 1)
+        index_html = _set_meta_content(index_html, attribute, name, content)
 
     serialized_payload = json.dumps(payload, ensure_ascii=True, separators=(',', ':')).replace('<', '\\u003c')
     index_html = index_html.replace(
@@ -4264,35 +4389,26 @@ def shared_incident_image(share_id: str):
     share_id = share_id.strip().lower()
     card = _share_card(incident)
     signature = _share_card_signature(card)
-    path = os.path.join(_share_image_cache_dir(), f'{share_id}-{signature}.jpg')
-    data = _read_share_image_cache(path)
+
     # A card without the map because tiles failed is redrawn soon; one for a
     # call with no coordinates looks the same every time.
-    complete = True
-    if data is None:
-        if not SHARE_IMAGE_RENDER_SLOTS.acquire(timeout=10):
-            busy = redirect('/og.png', code=302)
-            busy.headers['Cache-Control'] = 'no-store'
-            return busy
-        try:
-            data = _read_share_image_cache(path)
-            if data is None:
-                data, drew_map = share_image.render_share_card(card, _fetch_share_map_tile)
-                complete = drew_map or card.latitude is None
-                if complete:
-                    _write_share_image_cache(path, data)
-        finally:
-            SHARE_IMAGE_RENDER_SLOTS.release()
+    def render():
+        data, drew_map = share_image.render_share_card(card, _fetch_share_map_tile)
+        return data, drew_map or card.latitude is None
 
-    response = app.response_class(data, mimetype='image/jpeg')
-    if not complete:
-        response.headers['Cache-Control'] = 'public, max-age=300'
-    elif request.args.get('v') == signature:
-        response.headers['Cache-Control'] = 'public, max-age=604800, immutable'
-    else:
-        response.headers['Cache-Control'] = 'public, max-age=3600'
-    response.headers['X-Robots-Tag'] = 'noindex'
-    return response
+    return _serve_preview_image(os.path.join(_share_image_cache_dir(), f'{share_id}-{signature}.jpg'), signature, render)
+
+
+@app.route('/og/page/<slug>.jpg')
+def page_preview_image(slug: str):
+    """The link-preview card for the home page, a coverage page or reports."""
+    if slug not in PAGE_CARDS:
+        abort(404)
+    card, _ = PAGE_CARDS[slug]
+    signature = _page_card_signature(card)
+    return _serve_preview_image(
+        os.path.join(_share_image_cache_dir(), f'page-{slug}-{signature}.jpg'), signature,
+        lambda: share_image.render_page_card(card, _fetch_page_map_tile))
 
 
 @app.route('/about/')
