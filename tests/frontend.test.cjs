@@ -910,7 +910,7 @@ test('the poll loop always reschedules and a visibility change cannot start a se
 test('parish outlines load once from the local file, never the national county data', async () => {
   const fs = require('node:fs');
   const outlines = JSON.parse(fs.readFileSync(path.join(__dirname, '../public/parish-outlines.json'), 'utf8'));
-  assert.deepEqual(outlines.features.map(f => f.id).sort(), ['22017', '22033', '22055', '22071']);
+  assert.deepEqual(outlines.features.map(f => f.id).sort(), ['22017', '22019', '22033', '22055', '22071']);
   const requested = [];
   const added = [];
   const moveHandlers = [];

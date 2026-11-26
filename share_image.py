@@ -1,15 +1,23 @@
-"""Draw the 1200x630 link-preview card for a shared incident.
+"""Draw the 1200x630 link-preview cards.
 
-The card puts the call type, street, time and agency on the left and a
-street map with a pin on the right. Map tiles come from a caller-supplied
-fetcher so this module does no network I/O and tests can run offline. When
-the incident has no coordinates or any tile fails, the map side falls back
-to the parish outline (or the Louisiana911 icon) and the caller is told so
-it can cache that version briefly.
+A call card puts the call type, street, time and agency on the left and a
+street map with a pin on the right. When the incident has no coordinates or
+any tile fails, the map side falls back to the parish outline (or the
+Louisiana911 icon) and the caller is told so it can cache that version
+briefly.
+
+A page card (home page, coverage pages, reports) puts a title and summary on
+the left and the covered parish, outlined in gold on a dark map without
+labels, on the right, with the towns labeled in the card's own font. Without
+tiles it draws the outline and labels alone.
+
+Map tiles come from a caller-supplied fetcher, so this module does no network
+I/O and tests can run offline.
 """
 from __future__ import annotations
 
 import functools
+import hashlib
 import io
 import json
 import math
@@ -36,7 +44,11 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 FONT_PATH = os.path.join(ROOT, 'public', 'fonts', 'space-grotesk-5.3.0', 'latin.woff2')
 ICON_PATH = os.path.join(ROOT, 'public', 'images', 'louisiana911-icon-192.png')
 OUTLINES_PATH = os.path.join(ROOT, 'public', 'parish-outlines.json')
-SOURCE_PARISH_IDS = {'caddo': '22017', 'batonrouge': '22033', 'lafayette': '22055', 'neworleans': '22071'}
+STATE_OUTLINE_PATH = os.path.join(ROOT, 'public', 'louisiana-outline.json')
+SOURCE_PARISH_IDS = {
+    'caddo': '22017', 'batonrouge': '22033', 'lafayette': '22055', 'neworleans': '22071',
+    'lakecharles': '22019', 'sulphur': '22019',
+}
 MAP_ATTRIBUTION = '© OpenStreetMap contributors © CARTO'
 
 
@@ -54,6 +66,19 @@ class ShareCard:
     longitude: float | None = None
     approximate: bool = False
     active: bool = False
+
+
+@dataclass(frozen=True)
+class PageCard:
+    eyebrow: str               # "Live 911 calls"
+    eyebrow_color: tuple       # RGB
+    title: str                 # "Caddo 911"
+    summary: str               # "Police, fire, EMS and sheriff calls in Shreveport and Caddo Parish..."
+    details: str               # "Shreveport Police · Shreveport Fire · Caddo Sheriff"
+    parish_ids: tuple          # ('22017',): outlined in gold
+    places: tuple = ()         # (('Shreveport', 32.5093, -93.7501, 'right'), ...): labeled dots;
+                               # the label goes right, left, above or below the dot
+    bounds: tuple | None = None  # (south, west, north, east) to fit instead of the outlines
 
 
 TileFetcher = Callable[[int, int, int], 'Image.Image | None']
@@ -226,30 +251,66 @@ def _draw_pin(canvas: Image.Image, x: float, y: float, card: ShareCard) -> None:
     canvas.paste(pin, (left, top), pin)
 
 
-def _draw_text_panel(canvas: Image.Image, card: ShareCard) -> None:
-    # Solid behind the text, fading into the map.
+def _fade_panel(canvas: Image.Image, start: int = 580, end: int = 860) -> None:
+    """Solid behind the text, fading into the map between start and end."""
     fade = Image.new('L', (WIDTH, 1), 0)
     for x in range(WIDTH):
-        if x < 580:
+        if x < start:
             alpha = 255
-        elif x < 860:
-            t = (x - 580) / 280
+        elif x < end:
+            t = (x - start) / (end - start)
             alpha = round(255 * (1 - t * t * (3 - 2 * t)))
         else:
             alpha = 0
         fade.putpixel((x, 0), alpha)
     canvas.paste(Image.new('RGB', (WIDTH, HEIGHT), BG), (0, 0), fade.resize((WIDTH, HEIGHT)))
 
+
+def _draw_eyebrow(draw: ImageDraw.ImageDraw, y: int, text: str, color: tuple) -> float:
+    """A colored dot and words at the top left; returns where the words end."""
+    font = _font(600, 30)
+    dot = 14
+    draw.ellipse((PAD, y + 11, PAD + dot, y + 11 + dot), fill=color)
+    x = PAD + dot + 12
+    draw.text((x, y), text, font=font, fill=color)
+    return x + font.getlength(text)
+
+
+def _draw_footer(canvas: Image.Image, draw: ImageDraw.ImageDraw) -> None:
+    """The app icon and the site name."""
+    footer_y = HEIGHT - PAD - 46
+    try:
+        icon = Image.open(ICON_PATH).convert('RGBA').resize((46, 46), Image.LANCZOS)
+        mask = Image.new('L', (46 * 4, 46 * 4), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, 46 * 4 - 1, 46 * 4 - 1), radius=44, fill=255)
+        mask = mask.resize((46, 46), Image.LANCZOS)
+        canvas.paste(icon, (PAD, footer_y), Image.composite(icon.getchannel('A'), Image.new('L', (46, 46), 0), mask))
+    except OSError:
+        pass
+    draw.text((PAD + 60, footer_y + 5), 'louisiana911.com', font=_font(600, 30), fill=TEXT)
+
+
+def _draw_attribution(canvas: Image.Image) -> None:
+    draw = ImageDraw.Draw(canvas, 'RGBA')
+    font = _font(400, 15)
+    text_w = font.getlength(MAP_ATTRIBUTION)
+    draw.rectangle((WIDTH - text_w - 20, HEIGHT - 28, WIDTH, HEIGHT), fill=(10, 11, 16, 170))
+    draw.text((WIDTH - text_w - 10, HEIGHT - 24), MAP_ATTRIBUTION, font=font, fill=TEXT_DIM)
+
+
+def _jpeg(canvas: Image.Image) -> bytes:
+    output = io.BytesIO()
+    canvas.save(output, 'JPEG', quality=86, optimize=True, progressive=True)
+    return output.getvalue()
+
+
+def _draw_text_panel(canvas: Image.Image, card: ShareCard) -> None:
+    _fade_panel(canvas)
     draw = ImageDraw.Draw(canvas)
     y = PAD - 6
 
     # Status line: colored dot, status words, severity pill.
-    status_font = _font(600, 30)
-    dot = 14
-    draw.ellipse((PAD, y + 11, PAD + dot, y + 11 + dot), fill=card.status_color)
-    x = PAD + dot + 12
-    draw.text((x, y), card.status, font=status_font, fill=card.status_color)
-    x += status_font.getlength(card.status) + 18
+    x = _draw_eyebrow(draw, y, card.status, card.status_color) + 18
     if card.severity:
         pill_font = _font(600, 24)
         pill_w = pill_font.getlength(card.severity) + 30
@@ -282,17 +343,7 @@ def _draw_text_panel(canvas: Image.Image, card: ShareCard) -> None:
         draw.text((PAD, y), line, font=detail_font, fill=TEXT_DIM)
         y += 38
 
-    # Footer: the app icon and the site name.
-    footer_y = HEIGHT - PAD - 46
-    try:
-        icon = Image.open(ICON_PATH).convert('RGBA').resize((46, 46), Image.LANCZOS)
-        mask = Image.new('L', (46 * 4, 46 * 4), 0)
-        ImageDraw.Draw(mask).rounded_rectangle((0, 0, 46 * 4 - 1, 46 * 4 - 1), radius=44, fill=255)
-        mask = mask.resize((46, 46), Image.LANCZOS)
-        canvas.paste(icon, (PAD, footer_y), Image.composite(icon.getchannel('A'), Image.new('L', (46, 46), 0), mask))
-    except OSError:
-        pass
-    draw.text((PAD + 60, footer_y + 5), 'louisiana911.com', font=_font(600, 30), fill=TEXT)
+    _draw_footer(canvas, draw)
 
 
 def render_share_card(card: ShareCard, fetch_tile: TileFetcher) -> tuple[bytes, bool]:
@@ -303,14 +354,177 @@ def render_share_card(card: ShareCard, fetch_tile: TileFetcher) -> tuple[bytes, 
     if canvas is None:
         canvas, pin = _draw_fallback(card)
     else:
-        draw = ImageDraw.Draw(canvas, 'RGBA')
-        font = _font(400, 15)
-        text_w = font.getlength(MAP_ATTRIBUTION)
-        draw.rectangle((WIDTH - text_w - 20, HEIGHT - 28, WIDTH, HEIGHT), fill=(10, 11, 16, 170))
-        draw.text((WIDTH - text_w - 10, HEIGHT - 24), MAP_ATTRIBUTION, font=font, fill=TEXT_DIM)
+        _draw_attribution(canvas)
     if pin is not None:
         _draw_pin(canvas, pin[0], pin[1], card)
     _draw_text_panel(canvas, card)
-    output = io.BytesIO()
-    canvas.save(output, 'JPEG', quality=86, optimize=True, progressive=True)
-    return output.getvalue(), used_map
+    return _jpeg(canvas), used_map
+
+
+# Page cards ---------------------------------------------------------------
+
+AREA_CENTER = (940, 312)   # the map area is centered here...
+AREA_BOX = (440, 470)      # ...and fits inside this box
+AREA_MAX_ZOOM = 13
+PAGE_FADE = (630, 720)     # a shorter fade than the call card, so the outline's left edge shows
+
+
+@functools.lru_cache(maxsize=1)
+def _state_rings() -> list:
+    try:
+        with open(STATE_OUTLINE_PATH, encoding='utf-8') as handle:
+            geometry = json.load(handle)['features'][0]['geometry']
+    except (OSError, ValueError, KeyError, IndexError):
+        return []
+    polygons = [geometry['coordinates']] if geometry.get('type') == 'Polygon' else geometry.get('coordinates', [])
+    return [polygon[0] for polygon in polygons if polygon]
+
+
+def _draw_state_outline(canvas: Image.Image, project) -> None:
+    """A faint Louisiana border for the statewide cards; the unlabeled tiles barely show it."""
+    factor = 2
+    layer = Image.new('RGBA', (WIDTH * factor, HEIGHT * factor), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    for ring in _state_rings():
+        shape = [tuple(v * factor for v in project(lat, lon)) for lon, lat in ring]
+        draw.line(shape + [shape[0]], fill=TEXT_DIM + (140,), width=3, joint='curve')
+    layer = layer.resize((WIDTH, HEIGHT), Image.LANCZOS)
+    canvas.paste(layer, (0, 0), layer)
+
+
+def _area_rings(parish_ids: tuple) -> list:
+    outlines = _parish_outlines()
+    return [ring for parish_id in parish_ids for ring in outlines.get(parish_id, [])]
+
+
+def outline_digest(card: PageCard) -> str:
+    """Changes when any outline drawn on this card changes, for cache keys."""
+    rings = [_area_rings(card.parish_ids), _state_rings() if card.bounds else []]
+    blob = json.dumps(rings, separators=(',', ':'))
+    return hashlib.sha256(blob.encode('utf-8')).hexdigest()[:12]
+
+
+def _draw_area_map(rings: list, fetch_tile: TileFetcher, bounds: tuple | None = None):
+    """The dark map fitted to the outlines, or to bounds when given.
+
+    Returns (canvas, project, used_map). project(lat, lon) gives card pixels.
+    Tiles come from the zoom level just above the fit and are scaled down, so
+    the outlines fill the box and the labels stay sharp. If any tile is
+    missing the canvas is left plain, and used_map is False.
+    """
+    if bounds:
+        south, west, north, east = bounds
+        points = [_world_pixel(south, west, 0), _world_pixel(north, east, 0)]
+    else:
+        points = [_world_pixel(lat, lon, 0) for ring in rings for lon, lat in ring]
+    min_x, max_x = min(p[0] for p in points), max(p[0] for p in points)
+    min_y, max_y = min(p[1] for p in points), max(p[1] for p in points)
+    fit_zoom = math.log2(min(AREA_BOX[0] / (max_x - min_x), AREA_BOX[1] / (max_y - min_y)))
+    tile_zoom = min(math.ceil(fit_zoom), AREA_MAX_ZOOM)
+    scale = 2 ** (fit_zoom - tile_zoom)  # card pixels per tile pixel, 0.5 to 1
+    world = 2 ** tile_zoom
+    origin_x = (min_x + max_x) / 2 * world - AREA_CENTER[0] / scale
+    origin_y = (min_y + max_y) / 2 * world - AREA_CENTER[1] / scale
+
+    def project(lat: float, lon: float) -> tuple[float, float]:
+        x, y = _world_pixel(lat, lon, 0)
+        return (x * world - origin_x) * scale, (y * world - origin_y) * scale
+
+    big_w, big_h = math.ceil(WIDTH / scale), math.ceil(HEIGHT / scale)
+    left = int(origin_x + PAGE_FADE[0] / scale) // TILE_SIZE  # the text panel hides the rest
+    right = int(origin_x + big_w - 1) // TILE_SIZE
+    top = int(origin_y) // TILE_SIZE
+    bottom = int(origin_y + big_h - 1) // TILE_SIZE
+    wanted = [(x, y) for x in range(left, right + 1) for y in range(top, bottom + 1)]
+    tiles = []
+    if all(0 <= x < world and 0 <= y < world for x, y in wanted):
+        with ThreadPoolExecutor(max_workers=min(6, len(wanted))) as pool:
+            tiles = list(pool.map(lambda xy: fetch_tile(tile_zoom, xy[0], xy[1]), wanted))
+    if not tiles or any(tile is None for tile in tiles):
+        return Image.new('RGB', (WIDTH, HEIGHT), BG), project, False
+    big = Image.new('RGB', (big_w, big_h), BG)
+    for (x, y), tile in zip(wanted, tiles):
+        if tile.size != (TILE_SIZE, TILE_SIZE):
+            tile = tile.resize((TILE_SIZE, TILE_SIZE), Image.LANCZOS)
+        big.paste(tile.convert('RGB'), (round(x * TILE_SIZE - origin_x), round(y * TILE_SIZE - origin_y)))
+    return big.resize((WIDTH, HEIGHT), Image.LANCZOS), project, True
+
+
+def _draw_area_outlines(canvas: Image.Image, rings: list, project) -> None:
+    """Dim everything outside the outlines, tint inside, and draw the gold border."""
+    factor = 2
+    layer = Image.new('RGBA', (WIDTH * factor, HEIGHT * factor), (10, 11, 16, 95))
+    draw = ImageDraw.Draw(layer)
+    shapes = [[tuple(v * factor for v in project(lat, lon)) for lon, lat in ring] for ring in rings]
+    for shape in shapes:
+        draw.polygon(shape, fill=(169, 196, 255, 30))
+    for shape in shapes:
+        draw.line(shape + [shape[0]], fill=(10, 11, 16, 150), width=10, joint='curve')
+    for shape in shapes:
+        draw.line(shape + [shape[0]], fill=GOLD + (255,), width=5, joint='curve')
+    layer = layer.resize((WIDTH, HEIGHT), Image.LANCZOS)
+    canvas.paste(layer, (0, 0), layer)
+
+
+def _draw_places(canvas: Image.Image, places: tuple, project) -> None:
+    """A dot and a name for each town, in the card's font (the tiles have no labels)."""
+    draw = ImageDraw.Draw(canvas)
+    font = _font(600, 24)
+    for name, lat, lon, side in places:
+        x, y = project(lat, lon)
+        draw.ellipse((x - 8, y - 8, x + 8, y + 8), fill=BG)
+        draw.ellipse((x - 5, y - 5, x + 5, y + 5), fill=TEXT)
+        width = font.getlength(name)
+        text_x, text_y = {
+            'right': (x + 13, y - 16),
+            'left': (x - 13 - width, y - 16),
+            'above': (x - width / 2, y - 42),
+            'below': (x - width / 2, y + 10),
+        }[side]
+        draw.text((text_x, text_y), name, font=font, fill=TEXT, stroke_width=4, stroke_fill=BG)
+
+
+def _draw_page_panel(canvas: Image.Image, card: PageCard) -> None:
+    _fade_panel(canvas, *PAGE_FADE)
+    draw = ImageDraw.Draw(canvas)
+    y = PAD - 6
+    _draw_eyebrow(draw, y, card.eyebrow, card.eyebrow_color)
+    y += 66
+
+    title_font, title_lines = _fit_title(card.title)
+    title_step = round(title_font.size * 1.08)
+    for line in title_lines:
+        draw.text((PAD, y), line, font=title_font, fill=TEXT)
+        y += title_step
+    y += 18
+
+    summary_font = _font(500, 32)
+    summary_limit = 4 if len(title_lines) == 1 else 3
+    for line in _clip_lines(_wrap(card.summary, summary_font, TEXT_WIDTH), summary_font, TEXT_WIDTH, summary_limit):
+        draw.text((PAD, y), line, font=summary_font, fill=TEXT)
+        y += 42
+    y += 10
+
+    detail_font = _font(400, 28)
+    for line in _clip_lines(_wrap(card.details, detail_font, TEXT_WIDTH), detail_font, TEXT_WIDTH, 2):
+        draw.text((PAD, y), line, font=detail_font, fill=TEXT_DIM)
+        y += 38
+
+    _draw_footer(canvas, draw)
+
+
+def render_page_card(card: PageCard, fetch_tile: TileFetcher) -> tuple[bytes, bool]:
+    """Return (JPEG bytes, whether the map was drawn)."""
+    rings = _area_rings(card.parish_ids)
+    if rings:
+        canvas, project, used_map = _draw_area_map(rings, fetch_tile, card.bounds)
+        _draw_area_outlines(canvas, rings, project)
+        if card.bounds:
+            _draw_state_outline(canvas, project)
+        _draw_places(canvas, card.places, project)
+        if used_map:
+            _draw_attribution(canvas)
+    else:
+        canvas, used_map = Image.new('RGB', (WIDTH, HEIGHT), BG), False
+    _draw_page_panel(canvas, card)
+    return _jpeg(canvas), used_map
