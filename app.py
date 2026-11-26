@@ -19,17 +19,23 @@ import sys
 import math
 import re
 import json
+import dataclasses
 import functools
 import gzip
+import io
 import html as html_module
 from urllib.parse import urlsplit
 from difflib import SequenceMatcher
 from datetime import datetime, timezone, timedelta
-from threading import Lock, Thread
+from collections import OrderedDict
+import requests
+from threading import BoundedSemaphore, Lock, Thread
 from flask import Flask, abort, jsonify, redirect, request, send_from_directory
 from geopy.geocoders import Nominatim
 from apscheduler.schedulers.background import BackgroundScheduler
 from zoneinfo import ZoneInfo
+from PIL import Image
+import share_image
 import weather
 from sources import caddo as caddo_source
 from sources import lafayette as lafayette_source
@@ -700,6 +706,8 @@ APP_CHALLENGE_MAX_AGE_SECONDS = 300
 # Per IP. Kept above a handful because carrier NAT puts many phones behind one
 # address; each session still needs a Play Integrity verdict in that mode.
 APP_SESSION_RATE_LIMIT = int(os.environ.get('LOUISIANA911_APP_SESSION_RATE_LIMIT', '30'))
+# Link-preview images: crawlers fetch one per shared link, and the edge caches it.
+SHARE_IMAGE_RATE_LIMIT = int(os.environ.get('LOUISIANA911_SHARE_IMAGE_RATE_LIMIT', '60'))
 PLAY_INTEGRITY_CREDENTIALS = os.environ.get('LOUISIANA911_PLAY_INTEGRITY_CREDENTIALS', '').strip()
 _app_token_secret_setting = os.environ.get('LOUISIANA911_APP_TOKEN_SECRET', '').strip()
 APP_TOKEN_SECRET = (
@@ -1257,27 +1265,18 @@ def _share_place_text(incident: dict) -> str:
     return f'{place}, {area}' if area and area.lower() not in place.lower() else place
 
 
-def _share_reported_text(incident: dict) -> str:
+def _share_reported_text(incident: dict, joiner: str = ' at ') -> str:
     """'Nov 26 at 11:18 AM' in Louisiana time, or '' when the call has no usable date."""
     stamp = _parse_iso_datetime(_incident_reported_at(incident) or incident.get('first_seen'))
     if stamp is None:
         return ''
     local = stamp.astimezone(CENTRAL_TZ)
-    return f"{local:%b} {local.day} at {local.hour % 12 or 12}:{local:%M} {'PM' if local.hour >= 12 else 'AM'}"
+    return f"{local:%b} {local.day}{joiner}{local.hour % 12 or 12}:{local:%M} {'PM' if local.hour >= 12 else 'AM'}"
 
 
-def _share_preview_text(incident: dict) -> tuple[str, str]:
-    """Return (title, description) for link previews in plain, mixed-case words.
-
-    Example: ('Medical Emergency in Shreveport', 'Active call near Amherst @
-    Burke St & Quilen Blvd, Shreveport. Reported Nov 26 at 11:18 AM.
-    Shreveport Fire, 2 units.')
-    """
+def _share_preview_parts(incident: dict) -> dict:
+    """The plain-word pieces that the preview text and the preview image share."""
     source = _normalize_incident_source_for_read(incident.get('source'))
-    what = _plain_case(_clean_ws(str(incident.get('description') or '')) or 'Incident')
-    area = _share_area_name(incident) or REPORT_SOURCE_LABELS.get(source, 'Louisiana')
-    title = f'{what} in {area}'
-
     units = int(incident.get('units') or 0)
     is_active = bool(incident.get('is_active'))
     delayed = source in DELAYED_CLOSED_CALL_SOURCES
@@ -1289,19 +1288,175 @@ def _share_preview_text(incident: dict) -> tuple[str, str]:
         status = 'Open call' if source == 'neworleans' else 'Active call'
     else:
         status = 'Earlier call'
+    return {
+        'source': source,
+        'what': _plain_case(_clean_ws(str(incident.get('description') or '')) or 'Incident'),
+        'area': _share_area_name(incident) or REPORT_SOURCE_LABELS.get(source, 'Louisiana'),
+        'status': status,
+        'active': is_active and not delayed,
+        'delayed': delayed,
+        'place': _share_place_text(incident),
+        'agency': _share_agency_name(incident),
+        'units': f"{units} unit{'s' if units != 1 else ''}" if units > 0 else '',
+    }
 
-    place = _share_place_text(incident)
-    sentences = [f'{status} near {place}.' if place else f'{status} in {area}.']
+
+def _share_preview_text(incident: dict) -> tuple[str, str]:
+    """Return (title, description) for link previews in plain, mixed-case words.
+
+    Example: ('Medical Emergency in Shreveport', 'Active call near Amherst @
+    Burke St & Quilen Blvd, Shreveport. Reported Nov 26 at 11:18 AM.
+    Shreveport Fire, 2 units.')
+    """
+    parts = _share_preview_parts(incident)
+    title = f"{parts['what']} in {parts['area']}"
+    status, place = parts['status'], parts['place']
+    sentences = [f'{status} near {place}.' if place else f"{status} in {parts['area']}."]
     reported = _share_reported_text(incident)
     if reported:
-        sentences.append(f'Reported {reported}, posted a day later.' if delayed else f'Reported {reported}.')
-    who = [_share_agency_name(incident)]
-    if units > 0:
-        who.append(f"{units} unit{'s' if units != 1 else ''}")
-    who_text = ', '.join(part for part in who if part)
+        sentences.append(f'Reported {reported}, posted a day later.' if parts['delayed'] else f'Reported {reported}.')
+    who_text = ', '.join(part for part in (parts['agency'], parts['units']) if part)
     if who_text:
         sentences.append(f'{who_text[0].upper()}{who_text[1:]}.')
     return title, ' '.join(sentences)
+
+
+# Preview image (share_image.py draws it). Colors match getSeverityColor() and
+# severityLabel() in public/index.html.
+SHARE_CARD_VERSION = '1'
+SHARE_SEVERITY_STYLE = {
+    'high': ('Serious', (255, 59, 59)),
+    'medical': ('Medical', (255, 59, 59)),
+    'medium': ('Moderate', (255, 184, 48)),
+    'low': ('Minor', (59, 139, 255)),
+    'service': ('Service call', (0, 255, 136)),
+    'custody': ('Custody', (154, 160, 170)),
+}
+SHARE_STATUS_COLORS = {
+    'Very active call': (255, 59, 59),
+    'Active call': (255, 59, 59),
+    'Open call': (255, 184, 48),
+}
+SHARE_MAP_TILE_URL = 'https://{subdomain}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
+SHARE_IMAGE_RENDER_SLOTS = BoundedSemaphore(2)
+SHARE_IMAGE_CACHE_LIMIT = 4000
+_share_tile_cache: 'OrderedDict[tuple, bytes]' = OrderedDict()
+_share_tile_lock = Lock()
+_share_tile_session = requests.Session()
+
+
+def _share_coordinates(incident: dict) -> tuple[float, float] | None:
+    try:
+        lat, lon = float(incident.get('latitude')), float(incident.get('longitude'))
+    except (TypeError, ValueError):
+        return None
+    if not (28.7 <= lat <= 34.5 and -98.0 <= lon <= -88.5):  # MAP_COORDINATE_BOUNDS in index.html
+        return None
+    return lat, lon
+
+
+def _share_card(incident: dict) -> share_image.ShareCard:
+    parts = _share_preview_parts(incident)
+    severity_label, severity_color = SHARE_SEVERITY_STYLE.get(
+        incident_severity(incident.get('description'), incident.get('agency')), ('', (150, 154, 167)))
+    coordinates = _share_coordinates(incident)
+    quality = str(incident.get('geocode_quality') or '').lower()
+    approximate = quality.startswith('approximate-') or bool(
+        re.match(r'^\s*approx(?:imate)?\s+loc(?:ation)?\s*:', str(incident.get('street') or ''), re.IGNORECASE))
+    details = ' · '.join(part for part in (
+        _share_reported_text(incident, joiner=', '), parts['agency'], parts['units']) if part)
+    return share_image.ShareCard(
+        title=parts['what'],
+        status=parts['status'],
+        status_color=SHARE_STATUS_COLORS.get(parts['status'], share_image.TEXT_DIM),
+        severity=severity_label,
+        severity_color=severity_color,
+        place=parts['place'],
+        details=details,
+        source=parts['source'],
+        latitude=coordinates[0] if coordinates else None,
+        longitude=coordinates[1] if coordinates else None,
+        approximate=approximate,
+        active=parts['active'],
+    )
+
+
+def _share_card_signature(card: share_image.ShareCard) -> str:
+    """Changes whenever the drawn card would change, so the image URL can be cached for good."""
+    blob = json.dumps([SHARE_CARD_VERSION, share_image.MAP_ZOOM, dataclasses.asdict(card)], sort_keys=True)
+    return hashlib.sha256(blob.encode('utf-8')).hexdigest()[:12]
+
+
+def _share_image_cache_dir() -> str:
+    configured = os.environ.get('LOUISIANA911_SHARE_IMAGE_CACHE_DIR', '').strip()
+    return configured or os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), 'share-images')
+
+
+def _read_share_image_cache(path: str) -> bytes | None:
+    try:
+        with open(path, 'rb') as cached:
+            return cached.read()
+    except OSError:
+        return None
+
+
+def _write_share_image_cache(path: str, data: bytes) -> None:
+    """Keep rendered cards on disk; drop the oldest once there are too many."""
+    try:
+        directory = os.path.dirname(path)
+        os.makedirs(directory, exist_ok=True)
+        temporary = f'{path}.{os.getpid()}.{secrets.token_hex(4)}.tmp'
+        with open(temporary, 'wb') as handle:
+            handle.write(data)
+        os.replace(temporary, path)
+        names = os.listdir(directory)
+        if len(names) > SHARE_IMAGE_CACHE_LIMIT:
+            entries = sorted(((os.path.getmtime(os.path.join(directory, name)), name) for name in names))
+            for _, name in entries[:len(names) - SHARE_IMAGE_CACHE_LIMIT + SHARE_IMAGE_CACHE_LIMIT // 10]:
+                try:
+                    os.remove(os.path.join(directory, name))
+                except OSError:
+                    pass
+    except OSError as error:
+        log(f'[SHARE] Could not cache preview image: {error}')
+
+
+def _fetch_share_map_tile(z: int, x: int, y: int):
+    """One CARTO dark basemap tile for the preview image, or None."""
+    key = _carto_basemap_key()
+    if not key:
+        return None
+    cache_key = (z, x, y)
+    with _share_tile_lock:
+        data = _share_tile_cache.get(cache_key)
+        if data is not None:
+            _share_tile_cache.move_to_end(cache_key)
+    if data is None:
+        url = SHARE_MAP_TILE_URL.format(subdomain='abcd'[(x + y) % 4], z=z, x=x, y=y)
+        try:
+            response = _share_tile_session.get(
+                url, params={'key': key}, timeout=(3, 5),
+                headers={'User-Agent': SCRAPER_USER_AGENT, 'Referer': f'https://{CANONICAL_SITE_HOST}/'},
+            )
+        except requests.RequestException:
+            return None
+        if response.status_code != 200 or not response.headers.get('Content-Type', '').startswith('image/'):
+            return None
+        data = response.content
+        with _share_tile_lock:
+            _share_tile_cache[cache_key] = data
+            while len(_share_tile_cache) > 256:
+                _share_tile_cache.popitem(last=False)
+    try:
+        tile = Image.open(io.BytesIO(data))
+        tile.load()
+        return tile
+    except (OSError, ValueError):
+        return None
+
+
+def _share_image_url(share_id: str, card: share_image.ShareCard) -> str:
+    return f'https://{CANONICAL_SITE_HOST}/og/incident/{share_id}.jpg?v={_share_card_signature(card)}'
 
 
 def _serve_shared_incident_page(incident: dict):
@@ -1364,6 +1519,29 @@ def _serve_shared_incident_page(incident: dict):
         '<meta name="twitter:description" content="Live and daily public emergency incident feeds from across Louisiana on one map.">',
         f'<meta name="twitter:description" content="{escaped_description}">',
     )
+    # A card drawn for this call (call type, street, map pin) instead of the site banner.
+    card = _share_card(incident)
+    image_url = html_module.escape(_share_image_url(share_id, card), quote=True)
+    image_alt = html_module.escape(
+        f"Map of {card.title} near {card.place}" if card.place else preview_title, quote=True)
+    for old_tag, new_tag in (
+        ('<meta property="og:image" content="https://louisiana911.com/og.png">',
+         f'<meta property="og:image" content="{image_url}">'),
+        ('<meta property="og:image:type" content="image/png">',
+         '<meta property="og:image:type" content="image/jpeg">'),
+        ('<meta property="og:image:width" content="1733">',
+         f'<meta property="og:image:width" content="{share_image.WIDTH}">'),
+        ('<meta property="og:image:height" content="908">',
+         f'<meta property="og:image:height" content="{share_image.HEIGHT}">'),
+        ('<meta property="og:image:alt" content="Louisiana 911 public emergency incident monitor">',
+         f'<meta property="og:image:alt" content="{image_alt}">'),
+        ('<meta name="twitter:image" content="https://louisiana911.com/og.png">',
+         f'<meta name="twitter:image" content="{image_url}">'),
+        ('<meta name="twitter:image:alt" content="Louisiana 911 public emergency incident monitor">',
+         f'<meta name="twitter:image:alt" content="{image_alt}">'),
+    ):
+        index_html = index_html.replace(old_tag, new_tag, 1)
+
     serialized_payload = json.dumps(payload, ensure_ascii=True, separators=(',', ':')).replace('<', '\\u003c')
     index_html = index_html.replace(
         '</head>',
@@ -1410,6 +1588,8 @@ def _report_rate_bucket(path: str) -> tuple[str, int] | None:
         return 'other-api', INCIDENT_OTHER_API_RATE_LIMIT
     if clean_path == '/reports' or clean_path.startswith('/reports/'):
         return 'report-page', REPORT_PAGE_RATE_LIMIT
+    if clean_path.startswith('/og/'):
+        return 'share-image', SHARE_IMAGE_RATE_LIMIT
     return None
 
 
@@ -4073,6 +4253,46 @@ def shared_incident(share_id: str):
     if incident is None:
         abort(404)
     return _serve_shared_incident_page(incident)
+
+
+@app.route('/og/incident/<share_id>.jpg')
+def shared_incident_image(share_id: str):
+    """The link-preview card for one call, cached on disk and at the edge."""
+    incident = _find_incident_by_share_id(share_id)
+    if incident is None:
+        abort(404)
+    share_id = share_id.strip().lower()
+    card = _share_card(incident)
+    signature = _share_card_signature(card)
+    path = os.path.join(_share_image_cache_dir(), f'{share_id}-{signature}.jpg')
+    data = _read_share_image_cache(path)
+    # A card without the map because tiles failed is redrawn soon; one for a
+    # call with no coordinates looks the same every time.
+    complete = True
+    if data is None:
+        if not SHARE_IMAGE_RENDER_SLOTS.acquire(timeout=10):
+            busy = redirect('/og.png', code=302)
+            busy.headers['Cache-Control'] = 'no-store'
+            return busy
+        try:
+            data = _read_share_image_cache(path)
+            if data is None:
+                data, drew_map = share_image.render_share_card(card, _fetch_share_map_tile)
+                complete = drew_map or card.latitude is None
+                if complete:
+                    _write_share_image_cache(path, data)
+        finally:
+            SHARE_IMAGE_RENDER_SLOTS.release()
+
+    response = app.response_class(data, mimetype='image/jpeg')
+    if not complete:
+        response.headers['Cache-Control'] = 'public, max-age=300'
+    elif request.args.get('v') == signature:
+        response.headers['Cache-Control'] = 'public, max-age=604800, immutable'
+    else:
+        response.headers['Cache-Control'] = 'public, max-age=3600'
+    response.headers['X-Robots-Tag'] = 'noindex'
+    return response
 
 
 @app.route('/about/')
