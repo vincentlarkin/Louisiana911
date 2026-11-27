@@ -4942,7 +4942,8 @@ def _latest_delayed_refresh_label(labels) -> str | None:
         if not label:
             continue
         try:
-            parsed = datetime.strptime(' '.join(label.split()[:3]), '%b %d, %H:%M').replace(year=now.year)
+            # Parse with the year in the text: Python 3.15 rejects a day of month without a year.
+            parsed = datetime.strptime(f"{now.year} {' '.join(label.split()[:3])}", '%Y %b %d, %H:%M')
         except ValueError:
             best_label = best_label or label
             continue

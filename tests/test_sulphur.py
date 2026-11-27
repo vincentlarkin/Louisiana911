@@ -197,6 +197,16 @@ class SulphurDatabaseTests(unittest.TestCase):
         self.assertEqual(app._latest_delayed_refresh_label([None, 'Oct 30, 23:45 CDT']), 'Oct 30, 23:45 CDT')
         self.assertIsNone(app._latest_delayed_refresh_label([None, None]))
 
+    def test_refresh_label_across_new_year(self):
+        class NewYear(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2027, 1, 1, 0, 30, tzinfo=tz)
+
+        with patch.object(app, 'datetime', NewYear):
+            self.assertEqual(app._latest_delayed_refresh_label(['Jan 1, 00:10 CST', 'Dec 31, 23:45 CST']), 'Jan 1, 00:10 CST')
+            self.assertEqual(app._latest_delayed_refresh_label(['Dec 31, 23:45 CST', 'Jan 1, 00:10 CST']), 'Jan 1, 00:10 CST')
+
 
 if __name__ == '__main__':
     unittest.main()
